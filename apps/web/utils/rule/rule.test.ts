@@ -37,6 +37,7 @@ vi.mock("@/utils/analytics/rule-events.server", () => ({
 }));
 vi.mock("@/utils/email/provider-types", () => ({
   isMicrosoftProvider: vi.fn(() => false),
+  supportsFolders: vi.fn(() => false),
 }));
 vi.mock("@/utils/email/provider", () => ({
   createEmailProvider: vi.fn(),
