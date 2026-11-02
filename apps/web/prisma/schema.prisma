@@ -172,6 +172,7 @@ model EmailAccount {
   watchEmailsSubscriptionId      String? // For Outlook subscription ID
   watchEmailsSubscriptionHistory Json? // Historical Outlook subscription IDs: [{ subscriptionId, createdAt, replacedAt }]
   lastSyncedHistoryId            String?
+  imapConnection                 ImapConnection?
   behaviorProfile                Json?
   personaAnalysis                Json? // ai analysis of the user's persona
   role                           String? // the role confirmed by the user - previously `User.surveyRole`
@@ -2914,4 +2915,104 @@ model LoopsEmailSource {
   @@unique([campaignId], map: "LoopsEmailSource_campaignId_unversioned_key", where: { emailMessageId: null, campaignId: { not: null } })
   @@index([loopId])
   @@index([campaignId])
+}
+
+model ImapConnection {
+  id                   String    @id @default(cuid())
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  emailAccountId       String    @unique
+  imapHost             String
+  imapPort             Int
+  imapSecurity         String // "tls" | "starttls" | "none"
+  smtpHost             String
+  smtpPort             Int
+  smtpSecurity         String // "tls" | "starttls" | "none"
+  username             String
+  password             String // Encrypted by the prisma extension
+  tlsPinnedCertPem     String?   @db.Text // Self-signed certificate, e.g. Proton Mail Bridge
+  capabilities         String[]
+  labelStrategy        String    @default("database") // "keywords" | "folders" | "database"
+  labels               String[] // Label names for the "keywords" and "database" strategies
+  syncLeaseOwner       String?
+  syncLeaseUntil       DateTime?
+  lastSyncedAt         DateTime?
+  lastSyncError        String?
+  changesPrunedThrough BigInt    @default(0)
+
+  emailAccount EmailAccount   @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  mailboxes    ImapMailbox[]
+  messages     ImapMessage[]
+  syncItems    ImapSyncItem[]
+  changes      ImapChange[]
+}
+
+model ImapMailbox {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  connectionId  String
+  path          String
+  role          String? // "inbox" | "sent" | "drafts" | "trash" | "junk" | "archive"
+  uidValidity   BigInt
+  lastSeenUid   BigInt   @default(0)
+  highestModseq BigInt?
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  messages   ImapMessage[]
+
+  @@unique([connectionId, path])
+}
+
+// `id` is the message ID the app sees. The IMAP location changes on every move.
+model ImapMessage {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  connectionId    String
+  mailboxId       String
+  uidValidity     BigInt
+  uid             BigInt
+  threadId        String
+  rfc822MessageId String?
+  objectId        String? // RFC 8474 OBJECTID, stable across moves when offered
+  references      String[] // Normalized ancestors, to find replies synced before a parent
+  labels          String[] // Only used by the "database" label strategy
+  flags           String[]
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  mailbox    ImapMailbox    @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, uidValidity, uid])
+  @@index([connectionId, threadId])
+  @@index([connectionId, rfc822MessageId])
+  @@index([connectionId, objectId])
+  @@index([references], type: Gin)
+}
+
+model ImapSyncItem {
+  connectionId String
+  messageId    String
+  createdAt    DateTime  @default(now())
+  processedAt  DateTime?
+  attempts     Int       @default(0)
+  lastError    String?
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@id([connectionId, messageId])
+  @@index([connectionId, processedAt])
+}
+
+// Feed for the local mail client. Rows are never reused, so a cursor is an ID.
+model ImapChange {
+  id           BigInt   @id @default(autoincrement())
+  createdAt    DateTime @default(now())
+  connectionId String
+  messageId    String
+  kind         String // "upsert" | "delete"
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, id])
 }

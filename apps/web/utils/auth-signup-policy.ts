@@ -42,6 +42,18 @@ export function isAllowedAuthSignupEmail(
   return !!emailDomain && allowedDomains.includes(emailDomain);
 }
 
+/**
+ * Password sign-up cannot verify an address, so without an allowlist anyone
+ * could register someone else's and be linked to their account later.
+ */
+export function isPasswordLoginEnabled() {
+  const { allowedEmails = [], allowedDomains = [] } = getAuthSignupPolicy();
+  return (
+    env.NEXT_PUBLIC_AUTH_PASSWORD_ENABLED &&
+    allowedEmails.length + allowedDomains.length > 0
+  );
+}
+
 function getAuthSignupPolicy() {
   return {
     allowedEmails: env.AUTH_ALLOWED_EMAILS,

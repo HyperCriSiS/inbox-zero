@@ -3,6 +3,8 @@ import {
   getOutlookClientForEmail,
 } from "@/utils/email-account-client";
 import { GmailProvider } from "@/utils/email/google";
+import { ImapProvider } from "@/utils/email/imap";
+import { getImapConfig } from "@/utils/imap/config";
 import { OutlookProvider } from "@/utils/email/microsoft";
 import type { EmailProvider } from "@/utils/email/types";
 import { assertProviderNotRateLimited } from "@/utils/email/rate-limit";
@@ -30,6 +32,13 @@ export async function createEmailProvider({
       logger,
       source: "create-email-provider",
     });
+
+    if (rateLimitProvider === "imap") {
+      return withProviderFailureLogging(
+        new ImapProvider(await getImapConfig(emailAccountId), logger),
+        { emailAccountId, provider: rateLimitProvider, logger },
+      );
+    }
 
     if (rateLimitProvider === "google") {
       const client = await getGmailClientForEmail({ emailAccountId, logger });
@@ -81,7 +90,7 @@ function withProviderFailureLogging(
     logger,
   }: {
     emailAccountId: string;
-    provider: "google" | "microsoft";
+    provider: EmailProvider["name"];
     logger: Logger;
   },
 ): EmailProvider {
@@ -153,7 +162,7 @@ async function logProviderOperationFailure({
 }: {
   error: unknown;
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: EmailProvider["name"];
   logger: Logger;
   operation: string;
   failedAccessToken?: string;
@@ -208,7 +217,7 @@ async function recordProviderIssueSafely({
 type ProviderOperationFailureLogInput = {
   error: unknown;
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: EmailProvider["name"];
   logger: Logger;
   operation: string;
   failedAccessToken?: string;

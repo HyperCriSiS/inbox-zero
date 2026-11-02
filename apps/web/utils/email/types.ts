@@ -429,7 +429,7 @@ export interface EmailProvider {
     ownerEmail: string,
     folderName: string,
   ): Promise<void>;
-  readonly name: "google" | "microsoft";
+  readonly name: "google" | "microsoft" | "imap";
   removeDraftAttachment(
     draftId: string,
     attachmentId: string,

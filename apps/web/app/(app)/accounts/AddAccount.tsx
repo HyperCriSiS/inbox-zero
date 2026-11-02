@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { toastError } from "@/components/Toast";
 import Image from "next/image";
 import { MutedText } from "@/components/Typography";
+import { AddImapAccount } from "@/app/(app)/accounts/AddImapAccount";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { redirectToSafeUrl } from "@/utils/redirect";
@@ -76,6 +77,8 @@ export function AddAccount({
           <span className="ml-2">Add Microsoft</span>
         </Button>
       </div>
+
+      <AddImapAccount />
 
       <MutedText>{helperText}</MutedText>
     </div>

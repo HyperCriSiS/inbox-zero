@@ -246,6 +246,8 @@ const parsedEnv = createEnv({
     // Defaults to false. Only enable on a trusted, single-tenant self-hosted
     // deployment — never on a shared/multi-tenant instance.
     WEBHOOK_ALLOW_PRIVATE_IPS: booleanString.optional().default(false),
+    IMAP_ALLOW_PRIVATE_HOSTS: booleanString.optional().default(false),
+    IMAP_ALLOW_PLAINTEXT: booleanString.optional().default(false),
     DIGEST_MAX_SUMMARIES_PER_24H: z.coerce
       .number()
       .int()
@@ -501,6 +503,7 @@ const parsedEnv = createEnv({
       .default(false),
     NEXT_PUBLIC_USE_AEONIK_FONT: booleanString.optional().default(false),
     NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS: booleanString.optional(),
+    NEXT_PUBLIC_AUTH_PASSWORD_ENABLED: booleanString.optional().default(false),
     NEXT_PUBLIC_DIGEST_ENABLED: booleanString.optional(),
     NEXT_PUBLIC_MEETING_BRIEFS_ENABLED: booleanString.optional(),
     NEXT_PUBLIC_MEETING_RECORDER_ENABLED: booleanString.optional(),
@@ -610,6 +613,8 @@ const parsedEnv = createEnv({
     NEXT_PUBLIC_USE_AEONIK_FONT: process.env.NEXT_PUBLIC_USE_AEONIK_FONT,
     NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS:
       process.env.NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS,
+    NEXT_PUBLIC_AUTH_PASSWORD_ENABLED:
+      process.env.NEXT_PUBLIC_AUTH_PASSWORD_ENABLED,
     NEXT_PUBLIC_DIGEST_ENABLED: process.env.NEXT_PUBLIC_DIGEST_ENABLED,
     NEXT_PUBLIC_MEETING_BRIEFS_ENABLED:
       process.env.NEXT_PUBLIC_MEETING_BRIEFS_ENABLED,

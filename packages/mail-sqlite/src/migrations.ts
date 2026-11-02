@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS profile_state (
 
 CREATE TABLE IF NOT EXISTS accounts (
   account_id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL CHECK (provider IN ('google', 'microsoft')),
+  provider TEXT NOT NULL CHECK (provider IN ('google', 'microsoft', 'imap')),
   generation TEXT NOT NULL,
   assistant_cursor TEXT
 );
@@ -420,6 +420,7 @@ export async function migrateMailbox(
   await migrateMessageSearchIndex(tx);
   await migrateEmptyMeetingInvitationBodies(tx);
   await migrateContactSuggestions(tx);
+  await migrateImapAccounts(tx);
 }
 
 // Delta sync once stored a meeting invitation's flag without its body. Dropping
@@ -438,5 +439,51 @@ export async function migrateEmptyMeetingInvitationBodies(tx: SqlTransaction) {
   `);
   await tx.execute(
     "INSERT INTO schema_migrations(id, name) VALUES (9, '0009-empty-meeting-invitation-bodies')",
+  );
+}
+
+async function migrateImapAccounts(tx: SqlTransaction) {
+  if ((await tx.query("SELECT 1 FROM schema_migrations WHERE id = 9001")).length)
+    return;
+  const [table] = await tx.query(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",
+  );
+  if (!String(table.sql).includes("'imap'")) {
+    // DROP TABLE runs cascades even with deferred foreign keys. Preserve the derived indexes too.
+    const indexes = await tx.query(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('effective_role_conversations', 'effective_message_memberships')",
+    );
+    for (const { name } of indexes) {
+      await tx.exec(
+        `CREATE TEMP TABLE imap_backup_${name} AS SELECT * FROM ${name}`,
+      );
+    }
+    // Defer child references while replacing SQLite's immutable CHECK constraint.
+    await tx.exec(`
+      PRAGMA defer_foreign_keys = ON;
+      CREATE TABLE accounts_imap (
+        account_id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL CHECK (provider IN ('google', 'microsoft', 'imap')),
+        generation TEXT NOT NULL,
+        assistant_cursor TEXT,
+        connection TEXT
+      );
+      INSERT INTO accounts_imap SELECT account_id, provider, generation, assistant_cursor, connection FROM accounts;
+      DROP TABLE accounts;
+      ALTER TABLE accounts_imap RENAME TO accounts;
+    `);
+    for (const { name } of indexes) {
+      await tx.exec(`
+        INSERT INTO ${name} SELECT * FROM imap_backup_${name};
+        DROP TABLE imap_backup_${name};
+      `);
+    }
+    if ((await tx.query("PRAGMA foreign_key_check")).length)
+      throw new Error("Mailbox migration failed reference validation");
+    // The table replacement leaves stale deferred violations; the explicit check above validates all references.
+    await tx.exec("PRAGMA defer_foreign_keys = OFF");
+  }
+  await tx.execute(
+    "INSERT INTO schema_migrations(id, name) VALUES (9001, 'fork-imap-accounts')",
   );
 }

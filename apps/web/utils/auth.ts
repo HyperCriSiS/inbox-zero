@@ -19,6 +19,7 @@ import { after } from "next/server";
 import { env } from "@/env";
 import {
   assertAllowedAuthSignupEmail,
+  isPasswordLoginEnabled,
   isAllowedAuthSignupEmail,
 } from "@/utils/auth-signup-policy";
 import { trackDubSignUp } from "@/utils/dub";
@@ -267,7 +268,8 @@ export const betterAuthConfig = betterAuth({
   ],
   secret: env.AUTH_SECRET || env.NEXTAUTH_SECRET,
   emailAndPassword: {
-    enabled: false,
+    enabled: isPasswordLoginEnabled(),
+    minPasswordLength: 12,
   },
   database: prismaAdapter(prisma, {
     provider: "postgresql",

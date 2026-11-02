@@ -41,7 +41,10 @@ import {
   selectMailEngineRuntimeMode,
   shouldStartMailEngine,
 } from "@/utils/mail-engine/runtime-mode";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { fetchEmailAccounts } from "@/utils/fetch-email-accounts";
 import { followMailboxChanges } from "@/utils/mail-engine/follow-mailbox-changes";
 import { browserMailEngineCapabilities } from "@/utils/mail-engine/worker-protocol";
@@ -184,7 +187,11 @@ function MailEngineRuntimeInner({ children }: { children: ReactNode }) {
     if (mode === "unavailable") {
       return;
     }
-    const mailProvider = isMicrosoftProvider(provider) ? "microsoft" : "google";
+    const mailProvider = isImapProvider(provider)
+      ? "imap"
+      : isMicrosoftProvider(provider)
+        ? "microsoft"
+        : "google";
     const abort = new AbortController();
     let published: MailClient | undefined;
     let stage: MailEngineStartupStage =

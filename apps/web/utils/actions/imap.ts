@@ -1,0 +1,128 @@
+"use server";
+
+import { randomUUID } from "node:crypto";
+import { after } from "next/server";
+import { actionClientUser } from "@/utils/actions/safe-action";
+import { linkImapAccountBody } from "@/utils/actions/imap.validation";
+import { isImapProvider } from "@/utils/email/provider-types";
+import { SafeError } from "@/utils/error";
+import {
+  ImapConnectionPolicyError,
+  withImapClient,
+} from "@/utils/imap/connection";
+import { verifySmtp } from "@/utils/imap/smtp";
+import { syncImapAccount } from "@/utils/imap/sync";
+import prisma from "@/utils/prisma";
+
+export const linkImapAccountAction = actionClientUser
+  .metadata({ name: "linkImapAccount" })
+  .inputSchema(linkImapAccountBody)
+  .action(async ({ ctx: { userId, logger }, parsedInput: input }) => {
+    const existing = await prisma.emailAccount.findUnique({
+      where: { email: input.email },
+      select: {
+        id: true,
+        userId: true,
+        accountId: true,
+        account: { select: { provider: true } },
+      },
+    });
+    const isRelink =
+      !!existing &&
+      existing.userId === userId &&
+      isImapProvider(existing.account.provider);
+    if (existing && !isRelink) {
+      throw new SafeError("This email address is already linked");
+    }
+
+    const emailAccountId = existing?.id ?? randomUUID();
+    const config = {
+      emailAccountId,
+      imap: {
+        host: input.imapHost,
+        port: input.imapPort,
+        security: input.imapSecurity,
+      },
+      smtp: {
+        host: input.smtpHost,
+        port: input.smtpPort,
+        security: input.smtpSecurity,
+      },
+      username: input.username,
+      password: input.password,
+      tlsPinnedCertPem: input.tlsPinnedCertPem || null,
+    };
+
+    try {
+      await withImapClient(config, logger, async () => undefined);
+      await verifySmtp(config);
+    } catch (error) {
+      logger.warn("IMAP connection check failed", { error });
+      // Raw errors would let any signed-in user probe servers through this form.
+      throw new SafeError(
+        error instanceof ImapConnectionPolicyError
+          ? error.message
+          : "Could not sign in to the mail server. Check the settings and password.",
+      );
+    }
+
+    const settings = {
+      imapHost: input.imapHost,
+      imapPort: input.imapPort,
+      imapSecurity: input.imapSecurity,
+      smtpHost: input.smtpHost,
+      smtpPort: input.smtpPort,
+      smtpSecurity: input.smtpSecurity,
+      username: input.username,
+      password: input.password,
+      tlsPinnedCertPem: input.tlsPinnedCertPem || null,
+    };
+
+    if (existing) {
+      // Sync state stays, so a new password does not reprocess the mailbox.
+      await prisma.$transaction([
+        prisma.imapConnection.update({
+          where: { emailAccountId },
+          data: { ...settings, lastSyncError: null },
+        }),
+        prisma.account.update({
+          where: { id: existing.accountId },
+          data: { disconnectedAt: null },
+        }),
+      ]);
+      return { emailAccountId };
+    }
+
+    // Encryption is a per-model query extension, which skips nested writes, so
+    // ImapConnection must be its own top-level create to not store plaintext.
+    await prisma.$transaction([
+      prisma.account.create({
+        data: {
+          userId,
+          provider: "imap",
+          providerAccountId: input.email,
+          type: "credential",
+          emailAccount: {
+            create: {
+              id: emailAccountId,
+              userId,
+              email: input.email,
+              name: input.name || input.email.split("@")[0],
+            },
+          },
+        },
+      }),
+      prisma.imapConnection.create({
+        data: { emailAccountId, ...settings },
+      }),
+    ]);
+
+    after(() =>
+      syncImapAccount({
+        emailAccountId,
+        logger: logger.with({ emailAccountId }),
+      }),
+    );
+
+    return { emailAccountId };
+  });

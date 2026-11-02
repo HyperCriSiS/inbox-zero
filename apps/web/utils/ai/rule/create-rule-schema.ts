@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ActionType, LogicalOperator } from "@/generated/prisma/enums";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { supportsFolders } from "@/utils/email/provider-types";
 import { isDefined } from "@/utils/types";
 import {
   getOnlyIntegrationToolSpec,
@@ -353,7 +353,7 @@ function createRequiredFolderFieldsSchema(provider: string) {
   const fieldShape = createActionFieldShape(provider);
 
   if (!("folderName" in fieldShape)) {
-    throw new Error("MOVE_FOLDER is only supported for Microsoft providers.");
+    throw new Error("MOVE_FOLDER is only supported for providers with folders.");
   }
 
   return z.object({
@@ -392,7 +392,7 @@ function createActionFieldShape(provider: string) {
     webhookUrl: optionalStringField(
       "The webhook URL to call. Only relevant for explicit webhook or external HTTP callback requests.",
     ),
-    ...(isMicrosoftProvider(provider) && {
+    ...(supportsFolders(provider) && {
       folderName: optionalStringField("The folder to move the email to"),
     }),
   };

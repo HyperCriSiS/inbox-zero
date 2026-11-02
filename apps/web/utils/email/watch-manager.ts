@@ -13,6 +13,7 @@ import type { EmailProvider } from "@/utils/email/types";
 import { createManagedOutlookSubscription } from "@/utils/outlook/subscription-manager";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 import { logErrorWithDedupe } from "@/utils/log-error-with-dedupe";
@@ -176,6 +177,9 @@ async function watchEmailAccount(
 
     return null;
   }
+
+  // IMAP is polled, see utils/imap/sync.ts.
+  if (isImapProvider(account?.provider)) return null;
 
   if (!account?.access_token || !account?.refresh_token) {
     logger.info("User has no access token or refresh token");

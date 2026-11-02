@@ -18,7 +18,7 @@ export type TabMailMessage =
   | {
       type: "hello";
       accountId: string;
-      provider?: "google" | "microsoft";
+      provider?: "google" | "microsoft" | "imap";
     }
   | { type: "ready" }
   | { type: "owner"; accountId: string; ownerId: string }
@@ -66,7 +66,7 @@ export function bindTabMailOwner(input: {
   bus: TabMailBus;
   ensureAccount?: (input: {
     accountId: string;
-    provider: "google" | "microsoft";
+    provider: "google" | "microsoft" | "imap";
   }) => Promise<void>;
 }): () => void {
   const ownerId = crypto.randomUUID();
@@ -162,7 +162,7 @@ export function disposeTabFollowerClient(client: MailClient) {
 
 export function createTabFollowerClient(input: {
   accountId: string;
-  provider?: "google" | "microsoft";
+  provider?: "google" | "microsoft" | "imap";
   bus: TabMailBus;
 }): MailClient {
   let ownerId: string | undefined;
@@ -370,7 +370,7 @@ function announceOwner(
     bus: TabMailBus;
     ensureAccount?: (account: {
       accountId: string;
-      provider: "google" | "microsoft";
+      provider: "google" | "microsoft" | "imap";
     }) => Promise<void>;
   },
   message: Extract<TabMailMessage, { type: "hello" }>,

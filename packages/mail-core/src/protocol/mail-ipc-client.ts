@@ -9,7 +9,7 @@ export function createMailIpcClient(
     /** Observations subscribe to snapshots the host pushes when data changes. */
     push: MailIpcPushTransport;
     requestId?: () => string;
-    provider?: "google" | "microsoft";
+    provider?: "google" | "microsoft" | "imap";
   },
 ): MailClient & { inspect(): Promise<unknown> } {
   const requestId = options.requestId ?? defaultRequestId;

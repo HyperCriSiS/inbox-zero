@@ -1,5 +1,5 @@
 import { getEmailUrlForMessage } from "@/utils/url";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { isGoogleProvider } from "@/utils/email/provider-types";
 
 type GetEmailMessageCellActionsOptions = {
   externalUrl?: string;
@@ -22,9 +22,9 @@ export function getEmailMessageCellActions({
 
   const openUrl =
     externalUrl ||
-    (isMicrosoftProvider(provider)
-      ? undefined
-      : getEmailUrlForMessage(messageId, threadId, userEmail, provider));
+    (isGoogleProvider(provider)
+      ? getEmailUrlForMessage(messageId, threadId, userEmail, provider)
+      : undefined);
 
   return {
     openUrl,
