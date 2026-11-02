@@ -61,6 +61,8 @@ The app asks the server what it supports, so no provider is special-cased.
 Unit tests run with the normal suite. The live test needs Postgres, Dovecot and an
 SMTP sink; the commands are at the top of
 `apps/web/__tests__/integration/imap-provider.test.ts`.
+Set `IMAP_TEST_PLAIN=1` and `IMAP_TEST_PORT` to run it against GreenMail, a server
+without CONDSTORE or SPECIAL-USE, and `IMAP_TEST_LARGE=1` to add the large mailbox case.
 
 ## Merging upstream
 
