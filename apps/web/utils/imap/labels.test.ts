@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isLabelFolder,
+  toLabelFolderName,
   keywordToLabel,
   labelToKeyword,
 } from "@/utils/imap/labels";
@@ -25,6 +26,14 @@ describe("label keywords", () => {
   it("hides system flags and keywords", () => {
     expect(keywordToLabel("\\Seen")).toBeNull();
     expect(keywordToLabel("$Forwarded")).toBeNull();
+  });
+});
+
+describe("toLabelFolderName", () => {
+  it("flattens nested names", () => {
+    expect(toLabelFolderName("Inbox Zero/Processed")).toBe(
+      "Inbox Zero - Processed",
+    );
   });
 });
 

@@ -34,6 +34,7 @@ import {
 import { withImapClient } from "@/utils/imap/connection";
 import {
   isLabelFolder,
+  toLabelFolderName,
   keywordToLabel,
   labelToKeyword,
 } from "@/utils/imap/labels";
@@ -665,16 +666,27 @@ export class ImapProvider implements EmailProvider {
   }
 
   async getLabelByName(name: string) {
-    const wanted = name.toLowerCase();
+    const wanted = (
+      this.account.labelStrategy === "folders" ? toLabelFolderName(name) : name
+    ).toLowerCase();
     const labels = await this.getLabels();
     return labels.find((label) => label.name.toLowerCase() === wanted) ?? null;
   }
 
   async createLabel(name: string, _description?: string): Promise<EmailLabel> {
     if (this.account.labelStrategy === "folders") {
-      const path = `Labels/${name}`;
-      await this.withClient((client) => client.mailboxCreate(path));
-      return toLabel(path, name);
+      const folderName = toLabelFolderName(name);
+      const path = `Labels/${folderName}`;
+      return this.withClient(async (client) => {
+        // The index only learns of a new folder on the next sync.
+        const folders = await client.list();
+        const existing = folders.find(
+          (folder) => folder.path.toLowerCase() === path.toLowerCase(),
+        );
+        if (existing) return toLabel(existing.path, existing.name);
+        await client.mailboxCreate(path);
+        return toLabel(path, folderName);
+      });
     }
 
     const label = await this.getLabelByName(name);
@@ -712,7 +724,12 @@ export class ImapProvider implements EmailProvider {
     if (this.account.labelStrategy !== "folders") {
       throw new UnsupportedImapOperationError("Renaming a label");
     }
-    await this.renameFolder(labelId, `Labels/${update.name}`);
+    await this.withClient((client) =>
+      client.mailboxRename(
+        labelId,
+        `Labels/${toLabelFolderName(update.name as string)}`,
+      ),
+    );
   }
 
   async labelMessage(options: {
@@ -789,13 +806,27 @@ export class ImapProvider implements EmailProvider {
           folder.name.toLowerCase() === wanted,
       );
       if (existing) return existing.path;
-      const created = await client.mailboxCreate(folderName);
+      // Proton Mail Bridge refuses custom folders outside its `Folders` root.
+      const created = await client.mailboxCreate(
+        this.account.labelStrategy === "folders"
+          ? `Folders/${folderName}`
+          : folderName,
+      );
       return created.path;
     });
   }
 
   async renameFolder(folderId: string, name: string) {
-    await this.withClient((client) => client.mailboxRename(folderId, name));
+    await this.withClient(async (client) => {
+      const folders = await client.list();
+      const folder = folders.find((item) => item.path === folderId);
+      await client.mailboxRename(
+        folderId,
+        folder?.parentPath
+          ? `${folder.parentPath}${folder.delimiter}${name}`
+          : name,
+      );
+    });
   }
 
   async deleteFolder(folderId: string) {
@@ -1795,6 +1826,9 @@ export class ImapProvider implements EmailProvider {
 
   // Some servers file sent mail themselves, so a blind APPEND would duplicate it.
   private async storeSentCopy(raw: Buffer, messageId: string) {
+    // Proton Mail Bridge files it seconds later, too late for the search below.
+    if (this.account.labelStrategy === "folders") return;
+
     const mailbox = await this.findMailbox("sent");
     if (!mailbox) return;
 

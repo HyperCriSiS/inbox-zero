@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   composeMessage,
   parseRecipients,
-  stripBccHeader,
+  stripPrivateHeaders,
 } from "@/utils/imap/smtp";
 
 vi.mock("@/env", () => ({
@@ -34,14 +34,24 @@ describe("composeMessage", () => {
   });
 });
 
-describe("stripBccHeader", () => {
+describe("stripPrivateHeaders", () => {
   it("removes BCC, including folded lines, and leaves the rest intact", () => {
     const raw = Buffer.from(
       "From: a@x\r\nBcc: one@x,\r\n two@x\r\nTo: b@x\r\n\r\nBcc: body text\r\n",
     );
 
-    expect(stripBccHeader(raw).toString()).toBe(
+    expect(stripPrivateHeaders(raw).toString()).toBe(
       "From: a@x\r\nTo: b@x\r\n\r\nBcc: body text\r\n",
+    );
+  });
+
+  it("removes Proton Mail Bridge's internal headers", () => {
+    const raw = Buffer.from(
+      "X-Pm-Gluon-Id: 1\r\nFrom: a@x\r\nX-Pm-Internal-Id: 2\r\n\r\nbody\r\n",
+    );
+
+    expect(stripPrivateHeaders(raw).toString()).toBe(
+      "From: a@x\r\n\r\nbody\r\n",
     );
   });
 
@@ -54,7 +64,9 @@ describe("stripBccHeader", () => {
       text: "x",
     });
 
-    expect(stripBccHeader(raw).toString()).not.toContain("hidden@example.com");
+    expect(stripPrivateHeaders(raw).toString()).not.toContain(
+      "hidden@example.com",
+    );
   });
 });
 

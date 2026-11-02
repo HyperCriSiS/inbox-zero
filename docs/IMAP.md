@@ -36,9 +36,9 @@ The app asks the server what it supports, so no provider is special-cased.
 
 - **web.de and GMX:** enable IMAP in the mailbox settings first.
 - **Proton Mail:** IMAP needs Proton Mail Bridge running where the app can reach
-  it. Set `IMAP_ALLOW_PRIVATE_HOSTS`, use the Bridge password, and paste the
-  certificate exported from Bridge into the pinned certificate field. From Docker
-  the host is `host.docker.internal`, not `127.0.0.1`.
+  it, and Bridge needs a paid Proton plan. Set `IMAP_ALLOW_PRIVATE_HOSTS`, use the
+  Bridge password, and paste the certificate exported from Bridge into the pinned
+  certificate field. From Docker the host is `host.docker.internal`, not `127.0.0.1`.
 - **Gmail and Outlook:** use the native connection, which supports push and filters.
 
 ## Behavior
@@ -49,8 +49,12 @@ The app asks the server what it supports, so no provider is special-cased.
 - Linking indexes the newest 1,000 messages per folder. Older mail stays reachable
   through search.
 - Labels become IMAP keywords where the server allows them, which appear as tags in
-  Thunderbird when defined there. Proton uses its `Labels` folders. Other servers
-  keep labels in the app only, so other clients do not see them.
+  Thunderbird when defined there. Proton uses its `Labels` folders, which cannot
+  nest, so `Inbox Zero/Processed` becomes `Inbox Zero - Processed`. A label set on
+  Proton shows after the next sync. Other servers keep labels in the app only, so
+  other clients do not see them.
+- Proton files sent mail itself, so it reaches Sent a few seconds after sending.
+  New custom folders go under its `Folders` root.
 - Rules and sender filters, such as auto-archive, run in the app when new mail is
   synced. Contact search, signatures and contact photos are not available.
 - After a rejected password the account stops connecting, to avoid a lockout. Add
@@ -63,6 +67,7 @@ SMTP sink; the commands are at the top of
 `apps/web/__tests__/integration/imap-provider.test.ts`.
 Set `IMAP_TEST_PLAIN=1` and `IMAP_TEST_PORT` to run it against GreenMail, a server
 without CONDSTORE or SPECIAL-USE, and `IMAP_TEST_LARGE=1` to add the large mailbox case.
+`docker/proton-bridge-test` runs the real Proton Mail Bridge without a Proton account.
 
 ## Merging upstream
 

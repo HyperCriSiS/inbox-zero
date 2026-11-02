@@ -17,6 +17,7 @@ import {
   diffFlags,
   diffMailbox,
   type IndexedMessage,
+  isSyncableFolder,
   matchMovedMessages,
   type MailboxSyncMode,
   planMailboxSync,
@@ -177,7 +178,8 @@ async function syncIndex({
     connection.mailboxes.map((mailbox) => [mailbox.path, mailbox]),
   );
 
-  const folders = (await client.list()).filter(isSyncableFolder);
+  const listedFolders = await client.list();
+  const folders = listedFolders.filter(isSyncableFolder);
   const scans: MailboxScan[] = [];
   const permanentFlags = await readInboxPermanentFlags(client);
 
@@ -232,7 +234,8 @@ async function syncIndex({
     features: detectFeatures({
       capabilities: client.capabilities.keys(),
       permanentFlags,
-      folderPaths: folders.map((folder) => folder.path),
+      // Not the syncable subset: Proton's `Labels` root cannot be selected.
+      folderPaths: listedFolders.map((folder) => folder.path),
     }),
     capabilities: [...client.capabilities.keys()],
   });
@@ -647,15 +650,6 @@ export function getMailboxRole(folder: {
   return folder.specialUse
     ? (SPECIAL_USE_ROLES[folder.specialUse] ?? null)
     : null;
-}
-
-function isSyncableFolder(folder: ListResponse) {
-  // Virtual folders repeat messages that live elsewhere.
-  return (
-    !folder.flags.has("\\Noselect") &&
-    folder.specialUse !== "\\All" &&
-    folder.specialUse !== "\\Flagged"
-  );
 }
 
 /** CHANGEDSINCE keeps this cheap. Other servers report every flag, every run. */

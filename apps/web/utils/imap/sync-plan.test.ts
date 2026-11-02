@@ -3,10 +3,28 @@ import {
   diffFlags,
   diffMailbox,
   type IndexedMessage,
+  isSyncableFolder,
   matchMovedMessages,
   planMailboxSync,
   shouldEnqueueForRules,
 } from "@/utils/imap/sync-plan";
+
+describe("isSyncableFolder", () => {
+  it("skips virtual folders flagged in LIST without SPECIAL-USE", () => {
+    expect(isSyncableFolder({ flags: new Set(["\\All"]) })).toBe(false);
+    expect(isSyncableFolder({ flags: new Set(["\\Flagged"]) })).toBe(false);
+  });
+
+  it("skips folders that cannot be selected", () => {
+    expect(isSyncableFolder({ flags: new Set(["\\Noselect"]) })).toBe(false);
+  });
+
+  it("keeps ordinary folders", () => {
+    expect(
+      isSyncableFolder({ flags: new Set(["\\Sent"]), specialUse: "\\Sent" }),
+    ).toBe(true);
+  });
+});
 
 function row(uid: number, overrides: Partial<IndexedMessage> = {}) {
   return {

@@ -38,3 +38,8 @@ export function keywordToLabel(keyword: string): string | null {
 export function isLabelFolder(path: string) {
   return LABEL_FOLDER_PREFIX.test(path);
 }
+
+/** Proton labels cannot nest, while Inbox Zero's own names contain slashes. */
+export function toLabelFolderName(name: string) {
+  return name.replaceAll("/", " - ");
+}

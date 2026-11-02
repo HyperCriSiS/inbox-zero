@@ -30,6 +30,24 @@ export type IncomingMessage = {
 };
 
 const INTAKE_ROLES: readonly (ImapMailboxRole | null)[] = ["inbox", "sent"];
+const VIRTUAL_FOLDER_FLAGS = ["\\All", "\\Flagged"];
+
+/**
+ * Virtual folders repeat messages that live elsewhere. The LIST flags decide,
+ * because servers without SPECIAL-USE, like Proton Mail Bridge, still send them
+ * while the client leaves `specialUse` empty.
+ */
+export function isSyncableFolder(folder: {
+  flags: ReadonlySet<string>;
+  specialUse?: string;
+}) {
+  return (
+    !folder.flags.has("\\Noselect") &&
+    !VIRTUAL_FOLDER_FLAGS.some(
+      (flag) => folder.flags.has(flag) || folder.specialUse === flag,
+    )
+  );
+}
 
 export function planMailboxSync(
   stored: StoredMailboxState | null,

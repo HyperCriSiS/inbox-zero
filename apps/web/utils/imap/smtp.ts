@@ -28,19 +28,26 @@ export async function sendRawMessage(
 ) {
   const transport = await createTransport(config);
   try {
-    await transport.sendMail({ envelope, raw: stripBccHeader(raw) });
+    await transport.sendMail({ envelope, raw: stripPrivateHeaders(raw) });
   } finally {
     transport.close();
   }
 }
 
-/** Every recipient receives these exact bytes, so BCC must not be among them. */
-export function stripBccHeader(raw: Buffer) {
+/**
+ * Every recipient receives these exact bytes, so BCC must not be among them.
+ * `X-Pm-*` is what Proton Mail Bridge adds to a draft read back from it, and a
+ * draft sent with those accepted by Bridge never reached Sent.
+ */
+export function stripPrivateHeaders(raw: Buffer) {
   const headerEnd = raw.indexOf("\r\n\r\n");
   if (headerEnd === -1) return raw;
 
   const headers = raw.subarray(0, headerEnd).toString("latin1");
-  const kept = headers.replace(/^bcc:.*(?:\r\n[ \t].*)*(?:\r\n|$)/gim, "");
+  const kept = headers.replace(
+    /^(?:bcc|x-pm-[^:]*):.*(?:\r\n[ \t].*)*(?:\r\n|$)/gim,
+    "",
+  );
   return Buffer.concat([
     Buffer.from(kept.replace(/\r\n$/, ""), "latin1"),
     raw.subarray(headerEnd),
