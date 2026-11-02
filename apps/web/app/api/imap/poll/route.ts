@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { hasCronSecret } from "@/utils/cron";
 import { captureException } from "@/utils/error";
-import { pollImapAccounts } from "@/utils/imap/sync";
+import { enqueueImapAccounts } from "@/utils/imap/sync";
 import { withError } from "@/utils/middleware";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 export const GET = withError("imap/poll", async (request) => {
   if (!hasCronSecret(request)) {
@@ -13,10 +12,7 @@ export const GET = withError("imap/poll", async (request) => {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const results = await pollImapAccounts(request.logger);
+  const total = await enqueueImapAccounts(request.logger);
 
-  return NextResponse.json({
-    total: results.length,
-    errors: results.filter((result) => result.status === "error").length,
-  });
+  return NextResponse.json({ total });
 });

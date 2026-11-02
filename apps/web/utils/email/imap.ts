@@ -52,7 +52,10 @@ import { parseMessageIds, resolveThread } from "@/utils/imap/thread";
 import { inboxZeroLabels, type InboxZeroLabel } from "@/utils/label";
 import type { Logger } from "@/utils/logger";
 import { convertEmailHtmlToText } from "@/utils/mail";
-import type { OutlookFolder, OutlookSystemFolder } from "@/utils/outlook/folders";
+import type {
+  OutlookFolder,
+  OutlookSystemFolder,
+} from "@/utils/outlook/folders";
 import prisma from "@/utils/prisma";
 import type { ThreadsQuery } from "@/utils/threads/validation";
 import type { ParsedMessage } from "@/utils/types";

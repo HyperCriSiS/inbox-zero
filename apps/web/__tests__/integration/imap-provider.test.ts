@@ -394,24 +394,27 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     await expect(provider.getDraft(id)).resolves.toBeNull();
   });
 
-  test.skipIf(PLAIN)("a recreated folder keeps IDs across a UIDVALIDITY change", async () => {
-    await client.mailboxCreate("Projects");
-    await deliver("kept@x", { folder: "Projects" });
-    await sync();
-    const before = await row("kept@x");
-    const calls = newMailCalls();
+  test.skipIf(PLAIN)(
+    "a recreated folder keeps IDs across a UIDVALIDITY change",
+    async () => {
+      await client.mailboxCreate("Projects");
+      await deliver("kept@x", { folder: "Projects" });
+      await sync();
+      const before = await row("kept@x");
+      const calls = newMailCalls();
 
-    await client.mailboxDelete("Projects");
-    await client.mailboxCreate("Projects");
-    await deliver("kept@x", { folder: "Projects" });
-    await sync();
+      await client.mailboxDelete("Projects");
+      await client.mailboxCreate("Projects");
+      await deliver("kept@x", { folder: "Projects" });
+      await sync();
 
-    const after = await row("kept@x");
-    expect(after.id).toBe(before.id);
-    expect(after.uidValidity).not.toBe(before.uidValidity);
-    expect(newMailCalls()).toBe(calls);
-    await expect(provider.getMessage(before.id)).resolves.toBeTruthy();
-  });
+      const after = await row("kept@x");
+      expect(after.id).toBe(before.id);
+      expect(after.uidValidity).not.toBe(before.uidValidity);
+      expect(newMailCalls()).toBe(calls);
+      await expect(provider.getMessage(before.id)).resolves.toBeTruthy();
+    },
+  );
 
   test("the change feed reports new, changed, moved and deleted mail", async () => {
     await sync();
@@ -484,7 +487,9 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
   });
 
   test("an auto-archive filter applies to new mail and skips rules", async () => {
-    await provider.createAutoArchiveFilter({ from: "Filter <filter@example.org>" });
+    await provider.createAutoArchiveFilter({
+      from: "Filter <filter@example.org>",
+    });
     const [filter] = await provider.getFiltersList();
     expect(filter.criteria?.from).toBe("filter@example.org");
     const calls = newMailCalls();
@@ -570,11 +575,11 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
       ).resolves.toBe(BASELINE);
 
       const { messages } = await provider.searchMessages({
-        query: 'subject:"Large 5"',
+        query: 'subject:"Large 15"',
         folderId: "Large",
         maxResults: 200,
       });
-      expect(messages.map((item) => item.subject)).toContain("Large 5");
+      expect(messages.map((item) => item.subject)).toContain("Large 150");
 
       for (let index = 0; index < 600; index += 1) {
         await deliver(`new-${index}@x`, { subject: `Burst ${index}` });
@@ -583,16 +588,18 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
       const burstStart = Date.now();
       await sync();
       const burstMs = Date.now() - burstStart;
-      await sync();
-      await sync();
-      await sync();
+      // Rules run at most 100 messages per run, so a burst drains over several.
+      for (let run = 0; run < 6; run += 1) await sync();
       const items = await prisma.imapSyncItem.count({
         where: {
           connectionId,
           messageId: {
             in: (
               await prisma.imapMessage.findMany({
-                where: { connectionId, rfc822MessageId: { startsWith: "new-" } },
+                where: {
+                  connectionId,
+                  rfc822MessageId: { startsWith: "new-" },
+                },
                 select: { id: true },
               })
             ).map((message) => message.id),
@@ -699,24 +706,27 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     );
   });
 
-  test.skipIf(PLAIN)("a rejected password disconnects the account", async () => {
-    await prisma.imapConnection.update({
-      where: { id: connectionId },
-      data: { password: "wrong" },
-    });
+  test.skipIf(PLAIN)(
+    "a rejected password disconnects the account",
+    async () => {
+      await prisma.imapConnection.update({
+        where: { id: connectionId },
+        data: { password: "wrong" },
+      });
 
-    const result = await sync();
+      const result = await sync();
 
-    expect(result.status).toBe("disconnected");
-    const account = await prisma.account.findFirstOrThrow({
-      where: { userId },
-    });
-    expect(account.disconnectedAt).not.toBeNull();
-    const connection = await prisma.imapConnection.findUniqueOrThrow({
-      where: { id: connectionId },
-    });
-    expect(connection.lastSyncError).not.toContain("wrong");
-  });
+      expect(result.status).toBe("disconnected");
+      const account = await prisma.account.findFirstOrThrow({
+        where: { userId },
+      });
+      expect(account.disconnectedAt).not.toBeNull();
+      const connection = await prisma.imapConnection.findUniqueOrThrow({
+        where: { id: connectionId },
+      });
+      expect(connection.lastSyncError).not.toContain("wrong");
+    },
+  );
 });
 
 async function startCapturingSmtpServer() {

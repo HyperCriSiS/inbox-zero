@@ -32,7 +32,7 @@ import {
 } from "@/utils/imap/index-messages";
 import type { Logger } from "@/utils/logger";
 import prisma from "@/utils/prisma";
-import { mapWithConcurrency } from "@/utils/async";
+import { enqueueBackgroundJob } from "@/utils/queue/dispatch";
 import { processHistoryItem } from "@/utils/webhook/process-history-item";
 import {
   getWebhookEmailAccount,
@@ -48,6 +48,7 @@ const MAX_NEW_MESSAGES_PER_RUN = 500;
 const MAX_PENDING_PER_RUN = 100;
 const MAX_ATTEMPTS = 5;
 const ACCOUNT_CONCURRENCY = 3;
+const IMAP_SYNC_QUEUE = "imap-sync";
 
 const SPECIAL_USE_ROLES: Record<string, ImapMailboxRole> = {
   "\\Inbox": "inbox",
@@ -77,18 +78,27 @@ type MailboxScan = {
   incoming: FetchedMessage[];
 };
 
-export async function pollImapAccounts(logger: Logger) {
+/** Fans out so one slow mailbox cannot hold up the others or the cron request. */
+export async function enqueueImapAccounts(logger: Logger) {
   const accounts = await prisma.imapConnection.findMany({
     where: { emailAccount: { account: { disconnectedAt: null } } },
     select: { emailAccountId: true },
   });
 
-  return mapWithConcurrency(accounts, ACCOUNT_CONCURRENCY, (account) =>
-    syncImapAccount({
-      emailAccountId: account.emailAccountId,
-      logger: logger.with({ emailAccountId: account.emailAccountId }),
-    }),
-  );
+  for (const { emailAccountId } of accounts) {
+    await enqueueBackgroundJob({
+      topic: IMAP_SYNC_QUEUE,
+      body: { emailAccountId },
+      qstash: {
+        queueName: IMAP_SYNC_QUEUE,
+        parallelism: ACCOUNT_CONCURRENCY,
+        path: "/api/imap/sync",
+      },
+      logger,
+    });
+  }
+
+  return accounts.length;
 }
 
 export async function syncImapAccount({

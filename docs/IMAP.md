@@ -43,7 +43,9 @@ The app asks the server what it supports, so no provider is special-cased.
 
 ## Behavior
 
-- New mail is found by polling, so it can take up to a minute to appear.
+- New mail is found by polling, so it can take up to a minute to appear. Polling
+  queues one job per account on the `imap-sync` queue, and rules run for at most 100
+  messages per job, so a large burst drains over several runs.
 - Linking indexes the newest 1,000 messages per folder. Older mail stays reachable
   through search.
 - Labels become IMAP keywords where the server allows them, which appear as tags in
