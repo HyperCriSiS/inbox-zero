@@ -26,8 +26,9 @@ is in [IMAP_PROVIDER_DESIGN.md](./IMAP_PROVIDER_DESIGN.md).
 | `NEXT_PUBLIC_AUTH_PASSWORD_ENABLED` | Enables password sign-in without Google or Microsoft. Needs an allowlist below, otherwise it stays off. |
 | `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_EMAIL_DOMAINS` | Limit who can sign up. Set these on any install reachable by others, because a linked address is not verified as belonging to the user. |
 
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_PUBSUB_TOPIC_NAME` are still
-required by the app. Without Google, set them to placeholder values.
+Without Google, set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_PUBSUB_TOPIC_NAME` to `skipped`, which also hides the Google sign-in. Set
+`NEXT_PUBLIC_IMAP_ONLY=true` to hide the Google and Microsoft account buttons too.
 
 ## Providers
 
@@ -48,8 +49,8 @@ The app asks the server what it supports, so no provider is special-cased.
 - Labels become IMAP keywords where the server allows them, which appear as tags in
   Thunderbird when defined there. Proton uses its `Labels` folders. Other servers
   keep labels in the app only, so other clients do not see them.
-- Rules run in the app. Server-side filters, contact search, signatures and contact
-  photos are not available.
+- Rules and sender filters, such as auto-archive, run in the app when new mail is
+  synced. Contact search, signatures and contact photos are not available.
 - After a rejected password the account stops connecting, to avoid a lockout. Add
   the account again under **Accounts** with the new password. Its data is kept.
 

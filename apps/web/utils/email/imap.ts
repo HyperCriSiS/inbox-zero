@@ -52,7 +52,7 @@ import { parseMessageIds, resolveThread } from "@/utils/imap/thread";
 import { inboxZeroLabels, type InboxZeroLabel } from "@/utils/label";
 import type { Logger } from "@/utils/logger";
 import { convertEmailHtmlToText } from "@/utils/mail";
-import type { OutlookFolder } from "@/utils/outlook/folders";
+import type { OutlookFolder, OutlookSystemFolder } from "@/utils/outlook/folders";
 import prisma from "@/utils/prisma";
 import type { ThreadsQuery } from "@/utils/threads/validation";
 import type { ParsedMessage } from "@/utils/types";
@@ -736,13 +736,14 @@ export class ImapProvider implements EmailProvider {
   async getFolders(): Promise<OutlookFolder[]> {
     const mailboxes = await prisma.imapMailbox.findMany({
       where: { connectionId: this.account.connectionId },
-      select: { path: true },
+      select: { path: true, role: true },
     });
     return mailboxes
       .filter(({ path }) => !isLabelFolder(path))
-      .map(({ path }) => ({
+      .map(({ path, role }) => ({
         id: path,
         displayName: path.split(/[/.]/).at(-1) ?? path,
+        systemType: role ? ROLE_SYSTEM_FOLDERS[role] : undefined,
         childFolders: [],
         childFolderCount: 0,
         unreadItemCount: 0,
@@ -753,11 +754,11 @@ export class ImapProvider implements EmailProvider {
   async getFolderCounts(): Promise<EmailFolderCount[]> {
     const mailboxes = await prisma.imapMailbox.findMany({
       where: { connectionId: this.account.connectionId },
-      select: { path: true },
+      select: { path: true, role: true },
     });
     return this.withClient(async (client) => {
       const counts: EmailFolderCount[] = [];
-      for (const { path } of mailboxes) {
+      for (const { path, role } of mailboxes) {
         const status = await client.status(path, {
           messages: true,
           unseen: true,
@@ -768,6 +769,7 @@ export class ImapProvider implements EmailProvider {
           name: path,
           total: status.messages ?? 0,
           unread: status.unseen ?? 0,
+          systemType: role ? ROLE_SYSTEM_FOLDERS[role] : undefined,
         });
       }
       return counts;
@@ -1123,29 +1125,75 @@ export class ImapProvider implements EmailProvider {
 
   // --- Not available over IMAP ---
 
+  // --- Filters, kept in the database and applied by the sync ---
+
   async getFiltersList(): Promise<EmailFilter[]> {
-    return [];
+    const filters = await prisma.imapFilter.findMany({
+      where: { connectionId: this.account.connectionId },
+    });
+    return filters.map((filter) => ({
+      id: filter.id,
+      criteria: { from: filter.from },
+      action: {
+        addLabelIds: filter.addLabelIds,
+        removeLabelIds: filter.archive ? ["INBOX"] : [],
+      },
+    }));
   }
 
-  // Rules run in the app for IMAP, so there is no server-side filter to manage.
-  async createFilter(_options: {
+  async createFilter(options: {
     from: string;
     addLabelIds?: string[];
     removeLabelIds?: string[];
-  }): Promise<{ status: number }> {
-    throw new UnsupportedImapOperationError("Server-side filters");
+  }) {
+    await this.saveFilter({
+      from: options.from,
+      archive: !!options.removeLabelIds?.includes("INBOX"),
+      addLabelIds: options.addLabelIds ?? [],
+    });
+    return { status: 200 };
   }
 
-  async createAutoArchiveFilter(_options: {
+  async createAutoArchiveFilter(options: {
     from: string;
     gmailLabelId?: string;
     labelName?: string;
-  }): Promise<{ status: number }> {
-    throw new UnsupportedImapOperationError("Server-side filters");
+  }) {
+    const labelId = options.gmailLabelId ?? options.labelName;
+    await this.saveFilter({
+      from: options.from,
+      archive: true,
+      addLabelIds: labelId ? [labelId] : [],
+    });
+    return { status: 200 };
   }
 
-  async deleteFilter(_id: string): Promise<{ status: number }> {
-    throw new UnsupportedImapOperationError("Server-side filters");
+  async deleteFilter(id: string) {
+    await prisma.imapFilter.deleteMany({
+      where: { id, connectionId: this.account.connectionId },
+    });
+    return { status: 200 };
+  }
+
+  /** Returns true when the message was archived, so rules should not run. */
+  async applyFilters(message: ParsedMessage) {
+    const from = normalizeAddress(message.headers.from);
+    const filter = await prisma.imapFilter.findUnique({
+      where: {
+        connectionId_from: { connectionId: this.account.connectionId, from },
+      },
+    });
+    if (!filter) return false;
+
+    for (const labelId of filter.addLabelIds) {
+      await this.labelMessage({
+        messageId: message.id,
+        labelId,
+        labelName: null,
+      });
+    }
+    if (filter.archive) await this.archiveMessage(message.id);
+    return filter.archive;
   }
 
   async getSignatures(): Promise<EmailSignature[]> {
@@ -1446,6 +1494,20 @@ export class ImapProvider implements EmailProvider {
       nextPageToken:
         rows.length > maxResults ? String(offset + maxResults) : undefined,
     };
+  }
+
+  private async saveFilter(filter: {
+    from: string;
+    archive: boolean;
+    addLabelIds: string[];
+  }) {
+    const from = normalizeAddress(filter.from);
+    const { connectionId } = this.account;
+    await prisma.imapFilter.upsert({
+      where: { connectionId_from: { connectionId, from } },
+      create: { ...filter, connectionId, from },
+      update: { archive: filter.archive, addLabelIds: filter.addLabelIds },
+    });
   }
 
   private async recordChanges(messageIds: string[], kind: "upsert" | "delete") {
@@ -1863,6 +1925,15 @@ const SYSTEM_LABEL_ROLES: Record<string, ImapMailboxRole> = {
   DRAFT: "drafts",
   TRASH: "trash",
   SPAM: "junk",
+};
+
+const ROLE_SYSTEM_FOLDERS: Record<string, OutlookSystemFolder> = {
+  inbox: "INBOX",
+  sent: "SENT",
+  drafts: "DRAFT",
+  trash: "TRASH",
+  junk: "SPAM",
+  archive: "ARCHIVE",
 };
 
 const SEARCH_SCOPE_ROLES: Record<string, ImapMailboxRole | undefined> = {

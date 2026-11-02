@@ -48,6 +48,7 @@ import {
 import {
   isGoogleProvider,
   isMicrosoftProvider,
+  supportsFolders,
 } from "@/utils/email/provider-types";
 import { getActionErrorMessage } from "@/utils/error";
 import { GMAIL_LABEL_COLORS } from "@/utils/gmail/label-colors";
@@ -256,7 +257,7 @@ export const MailShellSidebar = memo(function MailShellSidebar({
       hrefFor={hrefFor}
       onNavigate={inSheet ? navigateFromSheet : onNavigate}
       labels={isAllAccounts ? NO_LABELS : allLabels}
-      folders={isAllAccounts || !isOutlook ? NO_FOLDERS : folders}
+      folders={isAllAccounts || !supportsFolders(provider) ? NO_FOLDERS : folders}
       countsById={isAllAccounts ? NO_COUNTS : countsById}
       categories={
         isAllAccounts

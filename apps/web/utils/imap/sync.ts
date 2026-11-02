@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ImapFlow, ListResponse } from "imapflow";
+import type { ImapProvider } from "@/utils/email/imap";
 import { createEmailProvider } from "@/utils/email/provider";
 import { detectFeatures } from "@/utils/imap/capabilities";
 import {
@@ -26,6 +27,7 @@ import {
   type FetchedMessage,
   fetchThreadHeaders,
   resolveThreads,
+  storedFlags,
   threadReferences,
 } from "@/utils/imap/index-messages";
 import type { Logger } from "@/utils/logger";
@@ -528,11 +530,11 @@ async function processPendingMessages({
   }
 
   const { emailAccount, hasAutomationRules, hasAiAccess } = validation.data;
-  const provider = await createEmailProvider({
+  const provider = (await createEmailProvider({
     emailAccountId,
     provider: "imap",
     logger,
-  });
+  })) as ImapProvider;
 
   const started = Date.now();
   let processedCount = 0;
@@ -555,7 +557,10 @@ async function processPendingMessages({
 
     try {
       const [message] = await provider.getMessagesBatch([item.messageId]);
-      if (message) {
+      const archivedByFilter = message
+        ? await provider.applyFilters(message)
+        : false;
+      if (message && !archivedByFilter) {
         await processHistoryItem(
           { messageId: item.messageId, threadId: message.threadId, message },
           {
@@ -653,7 +658,7 @@ async function fetchLiveFlags(client: ImapFlow, sinceModseq: bigint | null) {
   )) {
     flags.push({
       uid: BigInt(message.uid),
-      flags: [...(message.flags ?? [])],
+      flags: storedFlags(message.flags),
     });
   }
   return flags;

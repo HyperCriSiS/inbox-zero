@@ -34,7 +34,7 @@ export async function fetchThreadHeaders(
       const headers = parseThreadHeaders(message.headers);
       messages.push({
         uid: BigInt(message.uid),
-        flags: [...(message.flags ?? [])],
+        flags: storedFlags(message.flags),
         objectId: message.emailId ?? null,
         rfc822MessageId: parseMessageIds(headers["message-id"])[0] ?? null,
         referencesHeader: headers.references ?? null,
@@ -45,6 +45,11 @@ export async function fetchThreadHeaders(
   }
 
   return messages;
+}
+
+// Recent differs per session, so comparing it would report changes forever.
+export function storedFlags(flags: Iterable<string> | undefined) {
+  return [...(flags ?? [])].filter((flag) => flag !== "\Recent");
 }
 
 export function parseThreadHeaders(

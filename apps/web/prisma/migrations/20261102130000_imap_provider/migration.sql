@@ -82,6 +82,18 @@ CREATE TABLE "ImapChange" (
     CONSTRAINT "ImapChange_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "ImapFilter" (
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "connectionId" TEXT NOT NULL,
+    "from" TEXT NOT NULL,
+    "archive" BOOLEAN NOT NULL DEFAULT false,
+    "addLabelIds" TEXT[],
+
+    CONSTRAINT "ImapFilter_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "ImapConnection_emailAccountId_key" ON "ImapConnection"("emailAccountId");
 
@@ -109,6 +121,9 @@ CREATE INDEX "ImapSyncItem_connectionId_processedAt_idx" ON "ImapSyncItem"("conn
 -- CreateIndex
 CREATE INDEX "ImapChange_connectionId_id_idx" ON "ImapChange"("connectionId", "id");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "ImapFilter_connectionId_from_key" ON "ImapFilter"("connectionId", "from");
+
 -- AddForeignKey
 ALTER TABLE "ImapConnection" ADD CONSTRAINT "ImapConnection_emailAccountId_fkey" FOREIGN KEY ("emailAccountId") REFERENCES "EmailAccount"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -126,4 +141,7 @@ ALTER TABLE "ImapSyncItem" ADD CONSTRAINT "ImapSyncItem_connectionId_fkey" FOREI
 
 -- AddForeignKey
 ALTER TABLE "ImapChange" ADD CONSTRAINT "ImapChange_connectionId_fkey" FOREIGN KEY ("connectionId") REFERENCES "ImapConnection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ImapFilter" ADD CONSTRAINT "ImapFilter_connectionId_fkey" FOREIGN KEY ("connectionId") REFERENCES "ImapConnection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

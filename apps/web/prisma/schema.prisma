@@ -2945,6 +2945,7 @@ model ImapConnection {
   messages     ImapMessage[]
   syncItems    ImapSyncItem[]
   changes      ImapChange[]
+  filters      ImapFilter[]
 }
 
 model ImapMailbox {
@@ -3015,4 +3016,18 @@ model ImapChange {
   connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId, id])
+}
+
+// IMAP has no filter API here, so these run in the app when new mail is synced.
+model ImapFilter {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  connectionId String
+  from         String
+  archive      Boolean  @default(false)
+  addLabelIds  String[]
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, from])
 }

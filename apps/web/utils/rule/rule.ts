@@ -794,7 +794,7 @@ async function mapActionFields(
         subject: a.fields?.subject,
         content: integrationFields ? null : a.fields?.content,
         url: a.fields?.webhookUrl,
-        ...(isMicrosoftProvider(provider) && {
+        ...(supportsFolders(provider) && {
           folderName: folderName ?? null,
           folderId,
         }),

@@ -20,6 +20,7 @@ import {
 import {
   isGoogleProvider,
   isMicrosoftProvider,
+  supportsFolders,
 } from "@/utils/email/provider-types";
 import { isGmailLabelColor } from "@/utils/gmail/label-colors";
 import { getOutlookCategoryPreset } from "@/utils/outlook/category-colors";
@@ -514,9 +515,9 @@ function assertMailboxItemMutationSupported({
   kind: "label" | "folder";
   provider: string;
 }) {
-  if (kind === "folder" && !isMicrosoftProvider(provider)) {
+  if (kind === "folder" && !supportsFolders(provider)) {
     throw new SafeError(
-      "Folder actions are only available for Outlook accounts.",
+      "Folder actions are not available for this account.",
     );
   }
 }

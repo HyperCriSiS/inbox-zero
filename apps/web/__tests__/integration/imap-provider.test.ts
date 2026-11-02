@@ -41,12 +41,16 @@ vi.mock("@/utils/email/rate-limit", async (importOriginal) => ({
 
 const RUN = process.env.RUN_INTEGRATION_TESTS;
 const IMAP_HOST = "127.0.0.1";
-const IMAP_PORT = 31_143;
+// IMAP_TEST_PLAIN runs against GreenMail, a server with far fewer extensions.
+const PLAIN = !!process.env.IMAP_TEST_PLAIN;
+const IMAP_PORT = Number(process.env.IMAP_TEST_PORT ?? 31_143);
 const SMTP_PORT = 31_025;
 const MAILPIT_API = "http://127.0.0.1:38025/api/v1";
 const PASSWORD = "testpass";
 
-describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
+vi.setConfig({ testTimeout: 30_000 });
+
+describe.skipIf(!RUN)("IMAP provider against a real server", () => {
   const username = `user-${randomUUID().slice(0, 8)}`;
   const email = `${username}@example.com`;
   const logger = createTestLogger();
@@ -103,7 +107,7 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
       host: IMAP_HOST,
       port: IMAP_PORT,
       secure: false,
-      doSTARTTLS: true,
+      doSTARTTLS: !PLAIN,
       tls: { rejectUnauthorized: false },
       auth: { user: username, pass: PASSWORD },
       logger: false,
@@ -134,11 +138,10 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
         emailAccountId,
         imapHost: IMAP_HOST,
         imapPort: IMAP_PORT,
-        imapSecurity: "starttls",
-        tlsPinnedCertPem: readFileSync(
-          process.env.IMAP_TEST_CERT as string,
-          "utf8",
-        ),
+        imapSecurity: PLAIN ? "none" : "starttls",
+        tlsPinnedCertPem: PLAIN
+          ? null
+          : readFileSync(process.env.IMAP_TEST_CERT as string, "utf8"),
         smtpHost: IMAP_HOST,
         smtpPort: SMTP_PORT,
         smtpSecurity: "none",
@@ -172,7 +175,7 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
     });
 
     const account = await getImapConfig(emailAccountId);
-    expect(account.labelStrategy).toBe("keywords");
+    if (!PLAIN) expect(account.labelStrategy).toBe("keywords");
     provider = new ImapProvider(account, logger);
   });
 
@@ -391,7 +394,7 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
     await expect(provider.getDraft(id)).resolves.toBeNull();
   });
 
-  test("a recreated folder keeps IDs across a UIDVALIDITY change", async () => {
+  test.skipIf(PLAIN)("a recreated folder keeps IDs across a UIDVALIDITY change", async () => {
     await client.mailboxCreate("Projects");
     await deliver("kept@x", { folder: "Projects" });
     await sync();
@@ -411,6 +414,7 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
   });
 
   test("the change feed reports new, changed, moved and deleted mail", async () => {
+    await sync();
     const { cursor: start } = await provider.getMailboxSyncPage({ limit: 1 });
 
     await deliver("feed@x", { subject: "Feed mail" });
@@ -477,6 +481,36 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
     await expect(provider.getMessage("does-not-exist")).rejects.toMatchObject({
       status: 404,
     });
+  });
+
+  test("an auto-archive filter applies to new mail and skips rules", async () => {
+    await provider.createAutoArchiveFilter({ from: "Filter <filter@example.org>" });
+    const [filter] = await provider.getFiltersList();
+    expect(filter.criteria?.from).toBe("filter@example.org");
+    const calls = newMailCalls();
+
+    await client.append(
+      "INBOX",
+      Buffer.from(
+        [
+          "From: Filter <filter@example.org>",
+          `To: ${email}`,
+          "Subject: Filtered",
+          "Message-ID: <filtered@x>",
+          `Date: ${new Date().toUTCString()}`,
+          "",
+          "x",
+          "",
+        ].join("\r\n"),
+      ),
+    );
+    await sync();
+
+    expect((await row("filtered@x")).mailbox.role).toBe("archive");
+    expect(newMailCalls()).toBe(calls);
+
+    await provider.deleteFilter(filter.id);
+    await expect(provider.getFiltersList()).resolves.toEqual([]);
   });
 
   test("deleteDraft refuses anything that is not a draft", async () => {
@@ -567,7 +601,7 @@ describe.skipIf(!RUN)("IMAP provider against Dovecot", () => {
     );
   });
 
-  test("a rejected password disconnects the account", async () => {
+  test.skipIf(PLAIN)("a rejected password disconnects the account", async () => {
     await prisma.imapConnection.update({
       where: { id: connectionId },
       data: { password: "wrong" },

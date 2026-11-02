@@ -98,6 +98,7 @@ import {
 import {
   isGoogleProvider,
   isMicrosoftProvider,
+  supportsFolders,
 } from "@/utils/email/provider-types";
 import { getOpenInMailboxLabel } from "@/utils/url";
 import { useEmailLabels } from "@/providers/EmailLabelsProvider";
@@ -1029,8 +1030,7 @@ export function MailShell() {
   // Outlook categories use the same engine membership command as Gmail labels.
   const canLabel =
     currentLabelTargets.length > 0 &&
-    (isGoogleProvider(labelAccount?.account.provider) ||
-      isMicrosoftProvider(labelAccount?.account.provider)) &&
+    !!labelAccount?.account.provider &&
     currentLabelTargets.every(
       (target) => target.emailAccountId === labelAccountId,
     );
@@ -1492,10 +1492,10 @@ export function MailShell() {
   );
   const searchFolders = useMemo(
     () =>
-      isOutlook && !isAllAccounts
+      supportsFolders(provider) && !isAllAccounts
         ? getMailSearchFolders(folders)
         : NO_SEARCH_OPTIONS,
-    [folders, isAllAccounts, isOutlook],
+    [folders, isAllAccounts, provider],
   );
   // With the sidebar collapsed to its rail, this is the only sign that the
   // list isn't the inbox.

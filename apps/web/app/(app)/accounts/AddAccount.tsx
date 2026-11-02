@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { env } from "@/env";
 import { toastError } from "@/components/Toast";
 import Image from "next/image";
 import { MutedText } from "@/components/Typography";
@@ -43,7 +44,10 @@ export function AddAccount({
 
   return (
     <div className="flex flex-col items-center justify-center gap-3 min-h-[90px]">
-      <div className="flex items-center gap-2">
+      <div
+        className="flex items-center gap-2"
+        hidden={env.NEXT_PUBLIC_IMAP_ONLY}
+      >
         <Button
           variant="outline"
           className="w-full"

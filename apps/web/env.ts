@@ -504,6 +504,7 @@ const parsedEnv = createEnv({
     NEXT_PUBLIC_USE_AEONIK_FONT: booleanString.optional().default(false),
     NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS: booleanString.optional(),
     NEXT_PUBLIC_AUTH_PASSWORD_ENABLED: booleanString.optional().default(false),
+    NEXT_PUBLIC_IMAP_ONLY: booleanString.optional().default(false),
     NEXT_PUBLIC_DIGEST_ENABLED: booleanString.optional(),
     NEXT_PUBLIC_MEETING_BRIEFS_ENABLED: booleanString.optional(),
     NEXT_PUBLIC_MEETING_RECORDER_ENABLED: booleanString.optional(),
@@ -615,6 +616,7 @@ const parsedEnv = createEnv({
       process.env.NEXT_PUBLIC_BYPASS_PREMIUM_CHECKS,
     NEXT_PUBLIC_AUTH_PASSWORD_ENABLED:
       process.env.NEXT_PUBLIC_AUTH_PASSWORD_ENABLED,
+    NEXT_PUBLIC_IMAP_ONLY: process.env.NEXT_PUBLIC_IMAP_ONLY,
     NEXT_PUBLIC_DIGEST_ENABLED: process.env.NEXT_PUBLIC_DIGEST_ENABLED,
     NEXT_PUBLIC_MEETING_BRIEFS_ENABLED:
       process.env.NEXT_PUBLIC_MEETING_BRIEFS_ENABLED,

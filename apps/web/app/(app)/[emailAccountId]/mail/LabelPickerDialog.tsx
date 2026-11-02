@@ -17,7 +17,7 @@ import { useFolders } from "@/hooks/useFolders";
 import { useLabels } from "@/hooks/useLabels";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { createLabelAction } from "@/utils/actions/mail";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { supportsFolders } from "@/utils/email/provider-types";
 import { getActionErrorMessage } from "@/utils/error";
 import {
   FOLDER_SEPARATOR,
@@ -51,7 +51,7 @@ export function LabelPickerDialog({
   const client = useOptionalMailClient();
   const isMove = mode === "move";
   // Outlook categories don't change where a message lives, so moves target real folders.
-  const isFolderMove = isMove && isMicrosoftProvider(provider);
+  const isFolderMove = isMove && supportsFolders(provider);
   const {
     userLabels,
     isLoading: isLoadingLabels,
