@@ -45,8 +45,9 @@ export function AddAccount({
   return (
     <div className="flex flex-col items-center justify-center gap-3 min-h-[90px]">
       <div
-        className="flex items-center gap-2"
-        hidden={env.NEXT_PUBLIC_IMAP_ONLY}
+        className={
+          env.NEXT_PUBLIC_IMAP_ONLY ? "hidden" : "flex items-center gap-2"
+        }
       >
         <Button
           variant="outline"

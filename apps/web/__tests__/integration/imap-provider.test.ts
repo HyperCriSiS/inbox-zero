@@ -513,6 +513,104 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     await expect(provider.getFiltersList()).resolves.toEqual([]);
   });
 
+  test("bulk sender actions keep IDs after the next sync", async () => {
+    const bulkMail = (id: string) =>
+      Buffer.from(
+        [
+          "From: Bulk <bulk@example.org>",
+          `To: ${email}`,
+          "Subject: Bulk",
+          `Message-ID: <${id}>`,
+          `Date: ${new Date().toUTCString()}`,
+          "",
+          "x",
+          "",
+        ].join("\r\n"),
+      );
+    await client.append("INBOX", bulkMail("bulk1@x"));
+    await client.append("INBOX", bulkMail("bulk2@x"));
+    await sync();
+    const before = await row("bulk1@x");
+
+    await expect(
+      provider.bulkArchiveSenderOrThrow(
+        "bulk@example.org",
+        email,
+        emailAccountId,
+      ),
+    ).resolves.toBe(2);
+    await sync();
+
+    const archived = await row("bulk1@x");
+    expect(archived.id).toBe(before.id);
+    expect(archived.mailbox.role).toBe("archive");
+  });
+
+  test.runIf(process.env.IMAP_TEST_LARGE)(
+    "a large mailbox stays bounded and reachable",
+    async () => {
+      const BASELINE = 1000;
+      const TOTAL = 1200;
+      await client.mailboxCreate("Large");
+      for (let index = 0; index < TOTAL; index += 1) {
+        await deliver(`large-${index}@x`, {
+          folder: "Large",
+          subject: `Large ${index}`,
+        });
+      }
+
+      const baselineStart = Date.now();
+      await sync();
+      const baselineMs = Date.now() - baselineStart;
+      const mailbox = await prisma.imapMailbox.findFirstOrThrow({
+        where: { connectionId, path: "Large" },
+      });
+      await expect(
+        prisma.imapMessage.count({ where: { mailboxId: mailbox.id } }),
+      ).resolves.toBe(BASELINE);
+
+      const { messages } = await provider.searchMessages({
+        query: 'subject:"Large 5"',
+        folderId: "Large",
+        maxResults: 200,
+      });
+      expect(messages.map((item) => item.subject)).toContain("Large 5");
+
+      for (let index = 0; index < 600; index += 1) {
+        await deliver(`new-${index}@x`, { subject: `Burst ${index}` });
+      }
+      const calls = newMailCalls();
+      const burstStart = Date.now();
+      await sync();
+      const burstMs = Date.now() - burstStart;
+      await sync();
+      await sync();
+      await sync();
+      const items = await prisma.imapSyncItem.count({
+        where: {
+          connectionId,
+          messageId: {
+            in: (
+              await prisma.imapMessage.findMany({
+                where: { connectionId, rfc822MessageId: { startsWith: "new-" } },
+                select: { id: true },
+              })
+            ).map((message) => message.id),
+          },
+        },
+      });
+
+      const idleStart = Date.now();
+      await sync();
+      const idleMs = Date.now() - idleStart;
+
+      expect(items).toBe(600);
+      expect(newMailCalls() - calls).toBe(600);
+      console.log("LARGE", { baselineMs, burstMs, idleMs });
+    },
+    600_000,
+  );
+
   test("deleteDraft refuses anything that is not a draft", async () => {
     await deliver("keep@x");
     await sync();
