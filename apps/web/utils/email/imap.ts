@@ -1266,6 +1266,8 @@ export class ImapProvider implements EmailProvider {
     return prisma.imapMessage.findMany({
       where: { ...where, connectionId: this.account.connectionId },
       include: messageRowInclude,
+      // Date headers have second precision, so messages in one thread can tie.
+      orderBy: { uid: "asc" },
     });
   }
 

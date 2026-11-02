@@ -21,7 +21,6 @@ import {
   planMailboxSync,
   shouldEnqueueForRules,
 } from "@/utils/imap/sync-plan";
-import { parseMessageIds } from "@/utils/imap/thread";
 import {
   buildThreadMerges,
   type FetchedMessage,
