@@ -84,6 +84,10 @@ Microsoft calendar, and invitations are not answered from the app.
   root.
 - Rules and sender filters, such as auto-archive, run in the app when new mail is
   synced. Contact search, signatures and contact photos are not available.
+- Moving mail into a rule's folder in another client, or from it back to the inbox,
+  is saved as feedback for that rule, as adding or removing a label is on Gmail.
+  The assistant uses it when it picks rules for that sender. At most 50 moves are
+  read per poll.
 - Rules for a message are tried on five polls, then it is skipped so one broken
   message cannot block the queue. An outage of the AI provider, such as rate limits,
   overload or a dropped connection, does not count as a try: the poll stops and the

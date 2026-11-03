@@ -15,6 +15,10 @@ import {
 import type { ImapMailboxRole } from "@/utils/imap/message";
 import { isTemporaryFailure } from "@/utils/imap/temporary-failure";
 import {
+  type ImapMove,
+  learnFromImapMoves,
+} from "@/utils/imap/learn-from-moves";
+import {
   diffFlags,
   diffMailbox,
   getScanStartUid,
@@ -132,7 +136,7 @@ export async function syncImapAccount({
 
   try {
     const config = await getImapConfig(emailAccountId);
-    await withImapClient(config, logger, (client) =>
+    const moves = await withImapClient(config, logger, (client) =>
       syncIndex({ client, emailAccountId, owner }),
     );
     await pruneChanges(emailAccountId);
@@ -141,6 +145,7 @@ export async function syncImapAccount({
       owner,
       logger,
     });
+    await learnFromMovesSafely({ emailAccountId, moves, logger });
     await prisma.imapConnection.update({
       where: { emailAccountId },
       data: { lastSyncedAt: new Date(), lastSyncError: null },
@@ -231,7 +236,7 @@ async function syncIndex({
     select: indexedMessageSelect,
   });
 
-  await commitScans({
+  return commitScans({
     connectionId: connection.id,
     owner,
     scans,
@@ -360,6 +365,7 @@ async function commitScans({
     [...scans.flatMap((scan) => scan.vanished), ...orphaned],
     incoming,
   );
+  const previousPaths = await getMailboxPaths(moved.map(({ from }) => from.id));
 
   // A move into a mailbox beyond this run's page looks like a deletion, and
   // deleting would give that message a new ID and rerun its rules.
@@ -494,6 +500,48 @@ async function commitScans({
         ]
       : []),
   ]);
+
+  return moved.map(({ from, to }): ImapMove => {
+    const scan = scans[to.scanIndex];
+    return {
+      messageId: from.id,
+      fromPath: previousPaths.get(from.id) ?? null,
+      toPath: scan.path,
+      toRole: scan.role,
+    };
+  });
+}
+
+async function getMailboxPaths(messageIds: string[]) {
+  if (!messageIds.length) return new Map<string, string>();
+  const rows = await prisma.imapMessage.findMany({
+    where: { id: { in: messageIds } },
+    select: { id: true, mailbox: { select: { path: true } } },
+  });
+  return new Map(rows.map((row) => [row.id, row.mailbox.path]));
+}
+
+// Learning is a side effect of the sync, so a failure must not fail the run.
+async function learnFromMovesSafely({
+  emailAccountId,
+  moves,
+  logger,
+}: {
+  emailAccountId: string;
+  moves: ImapMove[];
+  logger: Logger;
+}) {
+  if (!moves.length) return;
+  try {
+    const provider = await createEmailProvider({
+      emailAccountId,
+      provider: "imap",
+      logger,
+    });
+    await learnFromImapMoves({ emailAccountId, moves, provider, logger });
+  } catch (error) {
+    logger.warn("Learning from IMAP moves failed", { error });
+  }
 }
 
 // A client behind the pruned range gets a reset and bootstraps again.

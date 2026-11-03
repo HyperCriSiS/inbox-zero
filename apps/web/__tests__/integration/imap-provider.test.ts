@@ -275,6 +275,48 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     });
   });
 
+  test("moving into and out of a rule's folder elsewhere is learned", async () => {
+    const folder = await provider.getOrCreateFolderIdByName("Rechnungen");
+    const rule = await prisma.rule.create({
+      data: {
+        emailAccountId,
+        name: "Invoices",
+        instructions: "Invoices and receipts",
+        actions: { create: { type: "MOVE_FOLDER", folderId: folder } },
+      },
+    });
+    await deliver("learn@x");
+    await sync();
+    const message = await row("learn@x");
+    const feedback = () =>
+      prisma.classificationFeedback.findMany({
+        where: { emailAccountId, ruleId: rule.id, messageId: message.id },
+        select: { eventType: true, sender: true },
+        orderBy: { createdAt: "asc" },
+      });
+
+    let lock = await client.getMailboxLock("INBOX");
+    await client.messageMove(String(message.uid), folder, { uid: true });
+    lock.release();
+    await sync();
+
+    expect(await feedback()).toEqual([
+      { eventType: "LABEL_ADDED", sender: "ana@example.org" },
+    ]);
+
+    const moved = await row("learn@x");
+    lock = await client.getMailboxLock(folder);
+    await client.messageMove(String(moved.uid), "INBOX", { uid: true });
+    lock.release();
+    await sync();
+
+    expect(await feedback()).toEqual([
+      { eventType: "LABEL_ADDED", sender: "ana@example.org" },
+      { eventType: "LABEL_REMOVED", sender: "ana@example.org" },
+    ]);
+    await prisma.rule.delete({ where: { id: rule.id } });
+  });
+
   test("a deletion in another client removes the row", async () => {
     await deliver("gone@x");
     await sync();
