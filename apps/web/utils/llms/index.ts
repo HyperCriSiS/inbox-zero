@@ -73,6 +73,12 @@ import {
   appendOllamaOnlySystemGuidance,
   OLLAMA_STRUCTURED_OUTPUT_GUIDANCE,
 } from "@/utils/llms/ollama-guidance";
+import {
+  buildSchemaInPromptRequest,
+  canMoveSchemaToPrompt,
+  isSchemaTooComplexError,
+  validateAgainstSchema,
+} from "@/utils/llms/schema-in-prompt";
 import { createScopedLogger } from "@/utils/logger";
 import { getPosthogLlmClient, isPosthogLlmEvalApproved } from "@/utils/posthog";
 import {
@@ -588,7 +594,30 @@ export function createGenerateObject({
       let result: GenerateObjectResult<RESULT>;
 
       try {
-        result = await generateObject<SCHEMA, OUTPUT, RESULT>(request);
+        try {
+          result = await generateObject<SCHEMA, OUTPUT, RESULT>(request);
+        } catch (error) {
+          if (!isSchemaTooComplexError(error) || !canMoveSchemaToPrompt(request))
+            throw error;
+
+          logger.warn("Provider rejected the schema, moving it to the prompt", {
+            label,
+            provider: candidate.provider,
+            model: candidate.modelName,
+          });
+          const fallbackResult = await generateObject(
+            (await buildSchemaInPromptRequest(request)) as Parameters<
+              typeof generateObject
+            >[0],
+          );
+          result = {
+            ...fallbackResult,
+            object: await validateAgainstSchema<RESULT>(
+              (request as { schema: FlexibleSchema<unknown> }).schema,
+              fallbackResult.object,
+            ),
+          } as GenerateObjectResult<RESULT>;
+        }
       } catch (error) {
         if (
           NoObjectGeneratedError.isInstance(error) &&
