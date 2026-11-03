@@ -127,6 +127,7 @@ describe("createCalendarEvent", () => {
           connection: {
             emailAccountId: "email-account-id",
             isConnected: true,
+            provider: { not: "caldav" },
           },
         },
         orderBy: [{ primary: "desc" }, { createdAt: "asc" }],

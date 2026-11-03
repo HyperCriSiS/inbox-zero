@@ -32,8 +32,8 @@ INBOX_ZERO_IMAGE=inbox-zero-imap INBOX_ZERO_PULL_POLICY=never docker compose up 
 
 | Variable | Purpose |
 | --- | --- |
-| `IMAP_ALLOW_PRIVATE_HOSTS` | Allows servers on private addresses, such as Proton Mail Bridge. Disables SSRF protection, so use it on trusted single-tenant installs only. |
-| `IMAP_ALLOW_PLAINTEXT` | Allows the security option `None`, which sends the password unencrypted. |
+| `IMAP_ALLOW_PRIVATE_HOSTS` | Allows IMAP, SMTP and CalDAV servers on private addresses, such as Proton Mail Bridge or a Nextcloud on the same network. Disables SSRF protection, so use it on trusted single-tenant installs only. |
+| `IMAP_ALLOW_PLAINTEXT` | Allows the security option `None`, and `http://` CalDAV URLs, which send the password unencrypted. |
 | `REVIEW_BEFORE_DELETE_LABEL` | Nothing goes to Trash or Spam. Rules, the chat, bulk actions and the mail view move that mail to this folder (a label on Gmail) instead, for you to check and empty. Undo brings it back to the inbox. Works for every provider. |
 | `NEXT_PUBLIC_AUTH_PASSWORD_ENABLED` | Enables password sign-in without Google or Microsoft. Needs an allowlist below, otherwise it stays off. |
 | `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_EMAIL_DOMAINS` | Limit who can sign up. Set these on any install reachable by others, because a linked address is not verified as belonging to the user. |
@@ -52,6 +52,20 @@ The app asks the server what it supports, so no provider is special-cased.
   Bridge password, and paste the certificate exported from Bridge into the pinned
   certificate field. From Docker the host is `host.docker.internal`, not `127.0.0.1`.
 - **Gmail and Outlook:** use the native connection, which supports push and filters.
+
+## Calendar
+
+IMAP has no calendar, so add one under **Calendars** with **Add CalDAV Calendar**:
+the server URL, user name and password, ideally an app password. It speaks plain
+CalDAV, so Nextcloud, iCloud, Fastmail, mailbox.org and Radicale should work; the
+tests run against Stalwart. Discovery starts from the URL, so the server root is
+usually enough, for example `https://cloud.example.com/remote.php/dav` for Nextcloud or
+`https://caldav.icloud.com` for iCloud.
+
+CalDAV calendars give meeting context to drafts and the assistant, and their busy
+times count for availability. Recurring events are expanded in the app. Events
+cannot be created in a CalDAV calendar yet, so booking links need a Google or
+Microsoft calendar, and invitations are not answered from the app.
 
 ## Behavior
 
@@ -93,6 +107,10 @@ For a server that needs a prepared account, such as Stalwart with its OBJECTID a
 QRESYNC support, set `IMAP_TEST_USER` and `IMAP_TEST_PASSWORD`. Each such run needs a
 fresh mailbox. `docker/proton-bridge-test` runs the real Proton Mail Bridge without a
 Proton account.
+
+`apps/web/__tests__/integration/caldav.test.ts` reads a real CalDAV server, such as
+Stalwart on its HTTP port, with `CALDAV_TEST_URL`, `CALDAV_TEST_USER` and
+`CALDAV_TEST_PASSWORD`. It writes three events and removes them again.
 
 To measure a real mailbox without linking it, run the read-only probe from `apps/web`.
 It changes nothing and reports only counts and timings, no subjects or addresses:

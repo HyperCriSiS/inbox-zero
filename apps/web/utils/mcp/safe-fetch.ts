@@ -112,7 +112,7 @@ export async function safePublicFetch(
   return response as unknown as Response;
 }
 
-function createSafeLookup(getAllowPrivateIps: () => boolean) {
+export function createSafeLookup(getAllowPrivateIps: () => boolean) {
   return (hostname: string, options: unknown, callback: LookupCallback) => {
     const allowPrivateIps = getAllowPrivateIps();
 

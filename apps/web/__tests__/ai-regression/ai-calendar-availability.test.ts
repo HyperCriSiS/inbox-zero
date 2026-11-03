@@ -96,6 +96,9 @@ function getMockCalendarConnections(): CalendarConnectionWithCalendars[] {
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 3_600_000), // 1 hour from now
       isConnected: true,
+      caldavUrl: null,
+      caldavUsername: null,
+      caldavPassword: null,
       emailAccountId: "email-account-id",
       calendars: [
         { calendarId: "primary", timezone: null, primary: false },
@@ -119,6 +122,9 @@ function getMockCalendarConnectionsWithTimezone(
       refreshToken: "refresh-token",
       expiresAt: new Date(Date.now() + 3_600_000),
       isConnected: true,
+      caldavUrl: null,
+      caldavUsername: null,
+      caldavPassword: null,
       emailAccountId: "email-account-id",
       calendars: [
         { calendarId: "primary", timezone, primary: true },
@@ -361,6 +367,9 @@ describe.runIf(isAiTest)("aiGetCalendarAvailability", () => {
           email: "user@test.com",
           emailAccountId: "email-account-id",
           isConnected: true,
+          caldavUrl: null,
+          caldavUsername: null,
+          caldavPassword: null,
           accessToken: "access-token-1",
           refreshToken: "refresh-token-1",
           expiresAt: new Date(Date.now() + 3_600_000),
@@ -376,6 +385,9 @@ describe.runIf(isAiTest)("aiGetCalendarAvailability", () => {
           email: "work@example.com",
           emailAccountId: "email-account-id",
           isConnected: true,
+          caldavUrl: null,
+          caldavUsername: null,
+          caldavPassword: null,
           accessToken: "access-token-2",
           refreshToken: "refresh-token-2",
           expiresAt: new Date(Date.now() + 3_600_000),
@@ -515,6 +527,9 @@ describe.runIf(isAiTest)("aiGetCalendarAvailability", () => {
           refreshToken: "refresh-token",
           expiresAt: new Date(Date.now() + 3_600_000),
           isConnected: true,
+          caldavUrl: null,
+          caldavUsername: null,
+          caldavPassword: null,
           emailAccountId: "email-account-id",
           calendars: [
             { calendarId: "primary", timezone: null, primary: false },
@@ -567,6 +582,9 @@ describe.runIf(isAiTest)("aiGetCalendarAvailability", () => {
           refreshToken: "refresh-token",
           expiresAt: new Date(Date.now() + 3_600_000),
           isConnected: true,
+          caldavUrl: null,
+          caldavUsername: null,
+          caldavPassword: null,
           emailAccountId: "email-account-id",
           calendars: [
             {

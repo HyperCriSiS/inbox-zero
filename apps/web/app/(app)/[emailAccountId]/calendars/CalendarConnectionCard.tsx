@@ -57,6 +57,11 @@ const getProviderInfo = (provider: string) => {
       icon: "/images/product/google-calendar.svg",
       alt: "Google Calendar",
     },
+    caldav: {
+      name: "CalDAV Calendar",
+      icon: "/images/product/caldav-calendar.svg",
+      alt: "CalDAV Calendar",
+    },
   };
 
   return providers[provider as keyof typeof providers] || providers.google;

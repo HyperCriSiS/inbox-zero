@@ -1528,12 +1528,16 @@ model CalendarConnection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  provider     String // "google" or "microsoft"
+  provider     String // "google", "microsoft" or "caldav"
   email        String // Google account email (e.g., "elie@gmail.com")
   accessToken  String?
   refreshToken String?
   expiresAt    DateTime?
   isConnected  Boolean   @default(true)
+  // CalDAV only. The password is encrypted at rest like the tokens.
+  caldavUrl      String?
+  caldavUsername String?
+  caldavPassword String?
 
   emailAccountId String
   emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
@@ -1912,7 +1916,7 @@ model DriveConnection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  provider     String // "google" or "microsoft"
+  provider     String // "google", "microsoft" or "caldav"
   email        String // can differ from emailAccount - e.g. connect work Drive to personal email
   accessToken  String?
   refreshToken String?

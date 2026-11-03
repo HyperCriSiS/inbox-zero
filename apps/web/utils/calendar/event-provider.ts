@@ -5,7 +5,9 @@ import type { Logger } from "@/utils/logger";
 import type { CalendarEventProvider } from "@/utils/calendar/event-types";
 import { GoogleCalendarEventProvider } from "@/utils/calendar/providers/google-events";
 import { MicrosoftCalendarEventProvider } from "@/utils/calendar/providers/microsoft-events";
+import { CalDavCalendarProvider } from "@/utils/calendar/providers/caldav";
 import {
+  isCalDavProvider,
   isGoogleProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
@@ -16,6 +18,10 @@ export const calendarConnectionProviderSelect = {
   accessToken: true,
   refreshToken: true,
   expiresAt: true,
+  email: true,
+  caldavUrl: true,
+  caldavUsername: true,
+  caldavPassword: true,
 } satisfies Prisma.CalendarConnectionSelect;
 
 export type CalendarConnectionForProvider =
@@ -73,7 +79,9 @@ export function createCalendarEventProvidersFromConnections({
 
     try {
       providers.push(
-        createCalendarEventProvider({ connection, emailAccountId, logger }),
+        isCalDavProvider(connection.provider)
+          ? createCalDavEventProvider(connection, emailAccountId)
+          : createCalendarEventProvider({ connection, emailAccountId, logger }),
       );
     } catch (error) {
       logger.error("Failed to create calendar event provider", {
@@ -97,6 +105,8 @@ export async function hasUsableCalendarConnection(emailAccountId: string) {
     select: {
       provider: true,
       refreshToken: true,
+      caldavUrl: true,
+      caldavPassword: true,
     },
   });
 
@@ -140,11 +150,35 @@ export function createCalendarEventProvider({
 function isUsableCalendarConnection(connection: {
   provider: string;
   refreshToken: string | null;
+  caldavUrl?: string | null;
+  caldavPassword?: string | null;
 }) {
+  if (isCalDavProvider(connection.provider)) {
+    return !!connection.caldavUrl && !!connection.caldavPassword;
+  }
   if (!connection.refreshToken) return false;
 
   return (
     isGoogleProvider(connection.provider) ||
     isMicrosoftProvider(connection.provider)
   );
+}
+
+// CalDAV calendars are read for context and free/busy only, so they get no
+// writer and stay out of createCalendarEventProvider.
+function createCalDavEventProvider(
+  connection: CalendarConnectionForProvider,
+  emailAccountId: string,
+) {
+  if (!connection.caldavUrl || !connection.caldavPassword) {
+    throw new SafeError("CalDAV connection is missing its server or password");
+  }
+  return new CalDavCalendarProvider({
+    serverUrl: connection.caldavUrl,
+    username: connection.caldavUsername ?? connection.email,
+    password: connection.caldavPassword,
+    email: connection.email,
+    connectionId: connection.id,
+    emailAccountId,
+  });
 }

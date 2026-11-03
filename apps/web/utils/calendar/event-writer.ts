@@ -199,6 +199,8 @@ async function getWritableCalendar({
       connection: {
         emailAccountId,
         isConnected: true,
+        // CalDAV calendars are read only here.
+        provider: { not: "caldav" },
       },
     },
     orderBy: [{ primary: "desc" }, { createdAt: "asc" }],

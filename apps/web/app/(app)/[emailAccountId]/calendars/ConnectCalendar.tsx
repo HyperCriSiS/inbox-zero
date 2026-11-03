@@ -12,6 +12,8 @@ import { CALENDAR_ONBOARDING_RETURN_COOKIE } from "@/utils/calendar/constants";
 import { useProductAnalytics } from "@/hooks/useProductAnalytics";
 import type { AppPage } from "@/utils/analytics/product";
 import { redirectToSafeUrl } from "@/utils/redirect";
+import { env } from "@/env";
+import { CalDavCalendarForm } from "./CalDavCalendarForm";
 
 export function ConnectCalendar({
   analyticsPage,
@@ -101,39 +103,46 @@ export function ConnectCalendar({
     }
   };
 
+  const isConnecting = isConnectingGoogle || isConnectingMicrosoft;
+
   return (
     <div className="flex gap-2 flex-wrap md:flex-nowrap">
-      <Button
-        onClick={handleConnectGoogle}
-        disabled={isConnectingGoogle || isConnectingMicrosoft}
-        variant="outline"
-        className="flex items-center gap-2 w-full md:w-auto"
-      >
-        <Image
-          src="/images/google.svg"
-          alt="Google"
-          width={16}
-          height={16}
-          unoptimized
-        />
-        {isConnectingGoogle ? "Connecting..." : "Add Google Calendar"}
-      </Button>
+      {!env.NEXT_PUBLIC_IMAP_ONLY && (
+        <>
+          <Button
+            onClick={handleConnectGoogle}
+            disabled={isConnectingGoogle || isConnectingMicrosoft}
+            variant="outline"
+            className="flex items-center gap-2 w-full md:w-auto"
+          >
+            <Image
+              src="/images/google.svg"
+              alt="Google"
+              width={16}
+              height={16}
+              unoptimized
+            />
+            {isConnectingGoogle ? "Connecting..." : "Add Google Calendar"}
+          </Button>
 
-      <Button
-        onClick={handleConnectMicrosoft}
-        disabled={isConnectingGoogle || isConnectingMicrosoft}
-        variant="outline"
-        className="flex items-center gap-2 w-full md:w-auto"
-      >
-        <Image
-          src="/images/microsoft.svg"
-          alt="Microsoft"
-          width={16}
-          height={16}
-          unoptimized
-        />
-        {isConnectingMicrosoft ? "Connecting..." : "Add Outlook Calendar"}
-      </Button>
+          <Button
+            onClick={handleConnectMicrosoft}
+            disabled={isConnectingGoogle || isConnectingMicrosoft}
+            variant="outline"
+            className="flex items-center gap-2 w-full md:w-auto"
+          >
+            <Image
+              src="/images/microsoft.svg"
+              alt="Microsoft"
+              width={16}
+              height={16}
+              unoptimized
+            />
+            {isConnectingMicrosoft ? "Connecting..." : "Add Outlook Calendar"}
+          </Button>
+        </>
+      )}
+      <CalDavCalendarForm disabled={isConnecting} />
     </div>
   );
 }
