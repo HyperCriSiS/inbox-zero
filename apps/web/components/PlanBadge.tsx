@@ -99,6 +99,8 @@ function getActionLabel(
   switch (type) {
     case ActionType.LABEL:
       return terminology.label.action;
+    case ActionType.REMOVE_LABEL:
+      return "Remove label";
     case ActionType.ARCHIVE:
       return "Archive";
     case ActionType.FORWARD:
@@ -135,6 +137,9 @@ function getActionMessage(action: PlanAction, provider: string): string {
   const terminology = getEmailTerminology(provider);
 
   switch (action.type) {
+    case ActionType.REMOVE_LABEL:
+      if (action.label) return `Remove "${action.label}"`;
+      return getActionLabel(action.type, provider, action);
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: ignore
     case ActionType.LABEL:
       if (action.label)
@@ -166,6 +171,7 @@ export function getActionColor(actionType: ActionType): Color {
     case ActionType.DELETE:
       return "yellow";
     case ActionType.LABEL:
+    case ActionType.REMOVE_LABEL:
       return "blue";
     case ActionType.MOVE_FOLDER:
       return "pink";

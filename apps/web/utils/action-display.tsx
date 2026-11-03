@@ -4,6 +4,7 @@ import { sortActionsByPriority } from "@/utils/action-sort";
 import {
   ArchiveIcon,
   BellIcon,
+  EraserIcon,
   FolderInputIcon,
   ForwardIcon,
   ReplyIcon,
@@ -68,7 +69,8 @@ export function getActionDisplay(
         return `Draft Reply: ${truncate(action.content, 10)}`;
       }
       return "Draft Reply";
-    case ActionType.LABEL: {
+    case ActionType.LABEL:
+    case ActionType.REMOVE_LABEL: {
       let labelName: string | null | undefined = null;
 
       // Priority 1: Use labelId to look up current name from labels
@@ -82,6 +84,12 @@ export function getActionDisplay(
       // Priority 2: Fallback to stored label name (may be outdated but better than nothing)
       if (!labelName && action.label) {
         labelName = action.label;
+      }
+
+      if (action.type === ActionType.REMOVE_LABEL) {
+        return labelName
+          ? `Remove '${truncate(labelName, 15)}'`
+          : ACTION_TYPE_LABELS[ActionType.REMOVE_LABEL];
       }
 
       return labelName
@@ -137,6 +145,7 @@ export function getActionDisplay(
 
 export const ACTION_TYPE_LABELS = {
   [ActionType.LABEL]: "Label",
+  [ActionType.REMOVE_LABEL]: "Remove label",
   [ActionType.ARCHIVE]: "Archive",
   [ActionType.DELETE]: "Delete",
   [ActionType.MARK_READ]: "Mark read",
@@ -161,6 +170,8 @@ export function getActionIcon(actionType: ActionType) {
   switch (actionType) {
     case ActionType.LABEL:
       return TagIcon;
+    case ActionType.REMOVE_LABEL:
+      return EraserIcon;
     case ActionType.ARCHIVE:
       return ArchiveIcon;
     case ActionType.DELETE:

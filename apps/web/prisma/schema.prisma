@@ -2184,6 +2184,7 @@ enum MobilePushTokenType {
 enum ActionType {
   ARCHIVE
   LABEL
+  REMOVE_LABEL
   REPLY
   SEND_EMAIL
   FORWARD

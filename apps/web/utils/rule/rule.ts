@@ -15,10 +15,7 @@ import {
   RULE_ANALYTICS_EVENTS,
   trackRuleEvent,
 } from "@/utils/analytics/rule-events.server";
-import {
-  isMicrosoftProvider,
-  supportsFolders,
-} from "@/utils/email/provider-types";
+import { supportsFolders } from "@/utils/email/provider-types";
 import { createEmailProvider } from "@/utils/email/provider";
 import { resolveLabelNameAndId } from "@/utils/label/resolve-label";
 import { getMissingRecipientMessage } from "@/utils/rule/recipient-validation";
@@ -747,7 +744,7 @@ async function mapActionFields(
         typeof a.fields?.folderName === "string" ? a.fields.folderName : null;
       let folderId: string | null = a.folderId || null;
 
-      if (a.type === ActionType.LABEL) {
+      if (a.type === ActionType.LABEL || a.type === ActionType.REMOVE_LABEL) {
         const emailProvider = await createEmailProvider({
           emailAccountId,
           provider,

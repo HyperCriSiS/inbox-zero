@@ -812,7 +812,10 @@ async function resolveActionLabels<
 
   return Promise.all(
     actions.map(async (action) => {
-      if (action.type === ActionType.LABEL) {
+      if (
+        action.type === ActionType.LABEL ||
+        action.type === ActionType.REMOVE_LABEL
+      ) {
         const labelName = action.labelId?.name || action.labelId?.value || null;
 
         if (isGoogleProvider(provider) && labelName) {

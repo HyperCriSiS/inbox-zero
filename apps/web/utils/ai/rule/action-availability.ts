@@ -24,6 +24,7 @@ export function getAvailableActionsForRuleEditor({
 
   return [
     ActionType.LABEL,
+    ActionType.REMOVE_LABEL,
     ...(supportsMoveFolder ? [ActionType.MOVE_FOLDER] : []),
     ActionType.ARCHIVE,
     ActionType.MARK_READ,

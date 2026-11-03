@@ -7,6 +7,7 @@ import { ActionType } from "@/generated/prisma/enums";
  */
 const ACTION_TYPE_PRIORITY_ORDER: ActionType[] = [
   ActionType.LABEL,
+  ActionType.REMOVE_LABEL,
 
   ActionType.MOVE_FOLDER,
   ActionType.ARCHIVE,

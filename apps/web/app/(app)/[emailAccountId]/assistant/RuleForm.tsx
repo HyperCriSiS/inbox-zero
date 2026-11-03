@@ -861,6 +861,10 @@ export function getRuleActionTypeOptions({
       label: labelActionText,
       value: ActionType.LABEL,
     },
+    {
+      label: ACTION_TYPE_LABELS[ActionType.REMOVE_LABEL],
+      value: ActionType.REMOVE_LABEL,
+    },
     ...(availableActions.has(ActionType.MOVE_FOLDER)
       ? [
           {

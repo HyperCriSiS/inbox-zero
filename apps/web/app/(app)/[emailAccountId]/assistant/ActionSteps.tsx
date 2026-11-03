@@ -419,7 +419,9 @@ function ActionCard({
         )}
       >
         <div>
-          {field.name === "labelId" && actionType === ActionType.LABEL ? (
+          {field.name === "labelId" &&
+          (actionType === ActionType.LABEL ||
+            actionType === ActionType.REMOVE_LABEL) ? (
             <div>
               <div className="flex items-center gap-2">
                 {isAiGenerated ? (

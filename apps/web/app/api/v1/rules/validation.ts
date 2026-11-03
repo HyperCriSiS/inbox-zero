@@ -31,6 +31,7 @@ const conditionSchema = z
 
 const ruleActionRequestTypeSchema = z.enum([
   ActionType.LABEL,
+  ActionType.REMOVE_LABEL,
   ActionType.ARCHIVE,
   ActionType.MARK_READ,
   ActionType.STAR,
@@ -87,6 +88,14 @@ const actionSchema = z
       requiredActionType: ActionType.LABEL,
       fieldValue: action.fields?.label,
       message: "LABEL requires a value in fields.label.",
+      path: ["fields", "label"],
+      ctx,
+    });
+    addMissingActionFieldIssue({
+      actionType: action.type,
+      requiredActionType: ActionType.REMOVE_LABEL,
+      fieldValue: action.fields?.label,
+      message: "REMOVE_LABEL requires a value in fields.label.",
       path: ["fields", "label"],
       ctx,
     });
