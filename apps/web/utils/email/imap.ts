@@ -1541,7 +1541,7 @@ export class ImapProvider implements EmailProvider {
       const mailbox = folderPath
         ? await this.findMailboxByPath(folderPath)
         : await this.findMailbox(scope.role as ImapMailboxRole);
-      if (!mailbox) return { rows: [] };
+      if (!mailbox) return { rows: [], nextPageToken: undefined };
 
       return this.searchMailbox({
         mailbox,
