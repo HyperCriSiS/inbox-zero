@@ -82,6 +82,17 @@ const draftKnowledgeUpdateSchema = z
   })
   .describe("Existing draft knowledge base item to update.");
 
+const draftKnowledgeDeleteSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .describe("Title of the draft knowledge item to delete."),
+  })
+  .describe("Draft knowledge base delete payload.");
+
 export const settingsPathSchema = z
   .enum([
     "assistant.multiRuleSelection.enabled",
@@ -168,16 +179,7 @@ export const settingsChangeSchema = z.discriminatedUnion("path", [
     path: z
       .literal("assistant.draftKnowledgeBase.delete")
       .describe("Delete a draft knowledge base item."),
-    value: z
-      .object({
-        title: z
-          .string()
-          .trim()
-          .min(1)
-          .max(200)
-          .describe("Title of the draft knowledge item to delete."),
-      })
-      .describe("Draft knowledge base delete payload."),
+    value: draftKnowledgeDeleteSchema,
   }),
 ]);
 
@@ -197,16 +199,34 @@ export const updateAssistantSettingsInputSchema = z.object({
     .describe("Structured settings changes to apply."),
 });
 
+const settingsPrimitiveValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
+
+// z.unknown() emits a schema node without a type, which strict
+// openai-compatible servers (llama.cpp, vLLM, LM Studio) reject when they build
+// a grammar from the tools. The per-path type is still checked against
+// settingsChangeSchema, so this only has to cover every shape a path takes.
+// Objects with more fields come first, as the first matching member wins.
+const settingsLlmValueSchema = z.union([
+  settingsPrimitiveValueSchema,
+  z.array(settingsPrimitiveValueSchema),
+  draftKnowledgeUpdateSchema,
+  draftKnowledgeDeleteSchema,
+  scheduledCheckInsConfigSchema,
+]);
+
 export const updateAssistantSettingsLlmChangeSchema = z
   .object({
     path: settingsPathSchema.describe(
       "Writable settings path (use a path returned by getAssistantCapabilities).",
     ),
-    value: z
-      .unknown()
-      .describe(
-        "Setting value for the path. Type depends on the path definition.",
-      ),
+    value: settingsLlmValueSchema.describe(
+      "Setting value for the path: a primitive, an array of primitives, or an object whose shape depends on the path.",
+    ),
     mode: z
       .enum(["append", "replace"])
       .nullish()
