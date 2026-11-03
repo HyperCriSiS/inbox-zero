@@ -160,6 +160,8 @@ describe.skipIf(!PASSWORD)(
       );
       await deliver("old");
 
+      // The Bridge address is fixed, so an interrupted run would block the next.
+      await prisma.user.deleteMany({ where: { email: EMAIL } });
       const user = await prisma.user.create({ data: { email: EMAIL } });
       userId = user.id;
       const account = await prisma.account.create({
