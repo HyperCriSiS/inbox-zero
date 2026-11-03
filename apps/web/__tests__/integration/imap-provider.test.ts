@@ -22,6 +22,7 @@ import { createTestLogger } from "@/__tests__/helpers";
 import { ImapProvider } from "@/utils/email/imap";
 import { processAccountFollowUps } from "@/utils/follow-up/process";
 import { withReviewBeforeDelete } from "@/utils/email/review-before-delete";
+import { startImapIdle } from "@/utils/imap/idle";
 import { getImapConfig } from "@/utils/imap/config";
 import { syncImapAccount } from "@/utils/imap/sync";
 import prisma from "@/utils/prisma";
@@ -316,6 +317,36 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     ]);
     await prisma.rule.delete({ where: { id: rule.id } });
   });
+
+  test("IDLE reports new mail in the inbox without a poll", async () => {
+    const onNewMail = vi.fn(async (_emailAccountId: string) => {});
+    let watching = false;
+    const idle = startImapIdle({
+      logger,
+      onNewMail,
+      onWatching: (id) => {
+        if (id === emailAccountId) watching = true;
+      },
+    });
+    try {
+      await vi.waitFor(() => expect(watching).toBe(true), {
+        timeout: 20_000,
+        interval: 100,
+      });
+      const started = Date.now();
+      await deliver("idle@x");
+
+      await vi.waitFor(
+        () => expect(onNewMail).toHaveBeenCalledWith(emailAccountId),
+        { timeout: 30_000, interval: 200 },
+      );
+      logger.info("IDLE latency", { ms: Date.now() - started });
+      await sync();
+      await expect(row("idle@x")).resolves.toBeTruthy();
+    } finally {
+      idle.stop();
+    }
+  }, 60_000);
 
   test("a deletion in another client removes the row", async () => {
     await deliver("gone@x");

@@ -89,6 +89,22 @@ type MailboxScan = {
   incoming: FetchedMessage[];
 };
 
+export async function enqueueImapAccountSync(
+  emailAccountId: string,
+  logger: Logger,
+) {
+  await enqueueBackgroundJob({
+    topic: IMAP_SYNC_QUEUE,
+    body: { emailAccountId },
+    qstash: {
+      queueName: IMAP_SYNC_QUEUE,
+      parallelism: ACCOUNT_CONCURRENCY,
+      path: "/api/imap/sync",
+    },
+    logger,
+  });
+}
+
 /** Fans out so one slow mailbox cannot hold up the others or the cron request. */
 export async function enqueueImapAccounts(logger: Logger) {
   const accounts = await prisma.imapConnection.findMany({
@@ -97,16 +113,7 @@ export async function enqueueImapAccounts(logger: Logger) {
   });
 
   for (const { emailAccountId } of accounts) {
-    await enqueueBackgroundJob({
-      topic: IMAP_SYNC_QUEUE,
-      body: { emailAccountId },
-      qstash: {
-        queueName: IMAP_SYNC_QUEUE,
-        parallelism: ACCOUNT_CONCURRENCY,
-        path: "/api/imap/sync",
-      },
-      logger,
-    });
+    await enqueueImapAccountSync(emailAccountId, logger);
   }
 
   return accounts.length;

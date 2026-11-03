@@ -115,12 +115,16 @@ export async function withImapClient<T>(
   config: ImapConfig,
   logger: Logger,
   run: (client: ImapFlow) => Promise<T>,
+  options: Pick<ImapFlowOptions, "maxIdleTime"> = {},
 ): Promise<T> {
   const release = await acquireConnectionSlot(config.emailAccountId);
 
   try {
     const address = await resolveEndpointAddress(config.imap);
-    const client = new ImapFlow(buildImapOptions(config, address));
+    const client = new ImapFlow({
+      ...buildImapOptions(config, address),
+      ...options,
+    });
     // Without a listener a dropped socket is an uncaught 'error' event, which
     // takes down the whole process.
     client.on("error", (error) => {

@@ -21,6 +21,12 @@ export type ImapMove = {
   toRole: ImapMailboxRole | null;
 };
 
+type MoveFeedback = {
+  move: ImapMove;
+  ruleId: string;
+  eventType: ClassificationFeedbackEventType;
+};
+
 /**
  * A move found by the sync was made in another client, because the app
  * updates its own rows when it moves mail. Moving mail into the folder of a
@@ -51,7 +57,7 @@ export async function learnFromImapMoves({
   if (!ruleByPath.size) return 0;
 
   const feedback = moves
-    .flatMap((move) => {
+    .flatMap((move): MoveFeedback[] => {
       const added = ruleByPath.get(move.toPath);
       if (added) {
         return [

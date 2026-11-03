@@ -34,6 +34,7 @@ INBOX_ZERO_IMAGE=inbox-zero-imap INBOX_ZERO_PULL_POLICY=never docker compose up 
 | --- | --- |
 | `IMAP_ALLOW_PRIVATE_HOSTS` | Allows IMAP, SMTP and CalDAV servers on private addresses, such as Proton Mail Bridge or a Nextcloud on the same network. Disables SSRF protection, so use it on trusted single-tenant installs only. |
 | `IMAP_ALLOW_PLAINTEXT` | Allows the security option `None`, and `http://` CalDAV URLs, which send the password unencrypted. |
+| `IMAP_IDLE_ENABLED` | Keeps one IMAP IDLE connection per account open on the inbox, so new mail is processed within seconds instead of on the next poll. Needs a long-running server, such as the Docker image; on serverless hosts leave it off. |
 | `REVIEW_BEFORE_DELETE_LABEL` | Nothing goes to Trash or Spam. Rules, the chat, bulk actions and the mail view move that mail to this folder (a label on Gmail) instead, for you to check and empty. Undo brings it back to the inbox. Works for every provider. |
 | `NEXT_PUBLIC_AUTH_PASSWORD_ENABLED` | Enables password sign-in without Google or Microsoft. Needs an allowlist below, otherwise it stays off. |
 | `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_EMAIL_DOMAINS` | Limit who can sign up. Set these on any install reachable by others, because a linked address is not verified as belonging to the user. |
@@ -69,9 +70,13 @@ Microsoft calendar, and invitations are not answered from the app.
 
 ## Behavior
 
-- New mail is found by polling, so it can take up to a minute to appear. Polling
-  queues one job per account on the `imap-sync` queue, and rules run for at most 100
-  messages per job, so a large burst drains over several runs.
+- New mail is found by polling, so it can take up to a minute to appear. With
+  `IMAP_IDLE_ENABLED=true` the server reports new mail in the inbox at once and a sync
+  starts within seconds; polling keeps running for the other folders and for servers
+  without IDLE. Each account then holds one extra connection, and several app
+  instances each open their own. Polling queues one job per account on the
+  `imap-sync` queue, and rules run for at most 100 messages per job, so a large
+  burst drains over several runs.
 - Linking indexes the newest 1,000 messages per folder. Older mail stays reachable
   through search.
 - Labels become IMAP keywords where the server allows them, which appear as tags in
