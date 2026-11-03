@@ -6,6 +6,17 @@ is in [IMAP_PROVIDER_DESIGN.md](./IMAP_PROVIDER_DESIGN.md).
 
 ## Setup
 
+The published `ghcr.io/elie222/inbox-zero` image has no IMAP support, so build the
+image from this fork and point `docker-compose.yml` at it:
+
+```bash
+docker build -f docker/Dockerfile.prod -t inbox-zero-imap .
+```
+
+```bash
+INBOX_ZERO_IMAGE=inbox-zero-imap INBOX_ZERO_PULL_POLICY=never docker compose up -d
+```
+
 1. Apply the database migrations.
 2. Make sure polling runs. `docker-compose.yml` calls `/api/imap/poll` every
    minute with `CRON_SECRET`. On another setup, schedule the same `GET` request:
@@ -53,10 +64,19 @@ The app asks the server what it supports, so no provider is special-cased.
   nest, so `Inbox Zero/Processed` becomes `Inbox Zero - Processed`. A label set on
   Proton shows after the next sync. Other servers keep labels in the app only, so
   other clients do not see them.
-- Proton files sent mail itself, so it reaches Sent a few seconds after sending.
-  New custom folders go under its `Folders` root.
+- Proton files sent mail itself, which took up to 40 seconds in tests, so it can
+  need a further poll to appear in Sent. New custom folders go under its `Folders`
+  root.
 - Rules and sender filters, such as auto-archive, run in the app when new mail is
   synced. Contact search, signatures and contact photos are not available.
+- Rules for a message are tried on five polls, then it is skipped so one broken
+  message cannot block the queue. An AI outage of several minutes can therefore leave
+  new mail without rules.
+- Without CONDSTORE, as on Proton Mail Bridge, every poll compares the indexed range
+  of every folder. A test mailbox with 60,000 messages in 9 folders took under 2
+  seconds per poll, and about 6 seconds with 72 folders.
+- Links in summary emails and notifications open the app's mail view, because IMAP
+  has no web client to link to.
 - After a rejected password the account stops connecting, to avoid a lockout. Add
   the account again under **Accounts** with the new password. Its data is kept.
 
@@ -67,7 +87,17 @@ SMTP sink; the commands are at the top of
 `apps/web/__tests__/integration/imap-provider.test.ts`.
 Set `IMAP_TEST_PLAIN=1` and `IMAP_TEST_PORT` to run it against GreenMail, a server
 without CONDSTORE or SPECIAL-USE, and `IMAP_TEST_LARGE=1` to add the large mailbox case.
-`docker/proton-bridge-test` runs the real Proton Mail Bridge without a Proton account.
+For a server that needs a prepared account, such as Stalwart with its OBJECTID and
+QRESYNC support, set `IMAP_TEST_USER` and `IMAP_TEST_PASSWORD`. Each such run needs a
+fresh mailbox. `docker/proton-bridge-test` runs the real Proton Mail Bridge without a
+Proton account.
+
+To measure a real mailbox without linking it, run the read-only probe from `apps/web`.
+It changes nothing and reports only counts and timings, no subjects or addresses:
+
+```bash
+node scripts/imap-readonly-probe.mjs --host 127.0.0.1 --port 1143 --user you@proton.me --ca bridge.crt
+```
 
 ## Merging upstream
 

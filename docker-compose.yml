@@ -58,8 +58,8 @@ services:
       - all
 
   web:
-    image: ghcr.io/elie222/inbox-zero:latest
-    pull_policy: always
+    image: ${INBOX_ZERO_IMAGE:-ghcr.io/elie222/inbox-zero:latest}
+    pull_policy: ${INBOX_ZERO_PULL_POLICY:-always}
     env_file:
       - path: ${INBOX_ZERO_ENV_FILE:-./apps/web/.env}
         required: false
@@ -86,8 +86,8 @@ services:
     restart: always
 
   worker:
-    image: ghcr.io/elie222/inbox-zero:latest
-    pull_policy: always
+    image: ${INBOX_ZERO_IMAGE:-ghcr.io/elie222/inbox-zero:latest}
+    pull_policy: ${INBOX_ZERO_PULL_POLICY:-always}
     command: ["/app/docker/scripts/start-worker.sh"]
     env_file:
       - path: ${INBOX_ZERO_ENV_FILE:-./apps/web/.env}

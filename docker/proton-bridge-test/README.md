@@ -29,3 +29,11 @@ Bridge and its IMAP engine are real, the API behind them is not:
 - The fake API drops the `Message-ID` of appended mail, so Bridge reports
   `<id@protonmail.internalid>` instead. Real accounts keep the original ID.
 - Sync of a real mailbox, Proton's rate limits and real delivery are not covered.
+- This QA build checks for updates every five minutes on a host that does not
+  resolve publicly. Each failed check makes Bridge report no internet and restart
+  its IMAP and SMTP servers, so a test can hit `Connection not available` once.
+  Release builds check hourly against a public host.
+- Bridge ignores the date given to `APPEND`, so nothing in this mailbox looks old.
+- Bridge learns of its own sends through events, which took up to 39 seconds.
+- Labels stay in the container between runs. Start a fresh container for a clean
+  mailbox.
