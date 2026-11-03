@@ -47,9 +47,9 @@ export async function fetchThreadHeaders(
   return messages;
 }
 
-// Recent differs per session, so comparing it would report changes forever.
+// \Recent differs per session, so comparing it would report changes forever.
 export function storedFlags(flags: Iterable<string> | undefined) {
-  return [...(flags ?? [])].filter((flag) => flag !== "Recent");
+  return [...(flags ?? [])].filter((flag) => flag !== "\\Recent");
 }
 
 export function parseThreadHeaders(

@@ -16,6 +16,7 @@ import type { ImapMailboxRole } from "@/utils/imap/message";
 import {
   diffFlags,
   diffMailbox,
+  getScanStartUid,
   type IndexedMessage,
   isSyncableFolder,
   matchMovedMessages,
@@ -267,20 +268,29 @@ async function scanMailbox({
   mode: Exclude<MailboxSyncMode, "idle">;
   scanIndex: number;
 }): Promise<MailboxScan> {
-  const serverUids = await searchAllUids(client);
   const indexed = stored
     ? await prisma.imapMessage.findMany({
         where: { connectionId, mailboxId: stored.id },
         select: indexedMessageSelect,
       })
     : [];
+  const lastSeenUid = stored?.lastSeenUid ?? BigInt(0);
+  const liveUidValidity = live.uidValidity;
+
+  // A baseline needs every UID. After that only the indexed range can change,
+  // which keeps a large mailbox cheap on servers without CONDSTORE.
+  const scanRange =
+    mode === "incremental"
+      ? `${getScanStartUid({ indexed, lastSeenUid, liveUidValidity })}:*`
+      : "1:*";
+  const serverUids = live.exists ? await searchUids(client, scanRange) : [];
 
   const { newUids, vanished } = diffMailbox({
     mode,
     serverUids,
     indexed,
-    lastSeenUid: stored?.lastSeenUid ?? BigInt(0),
-    liveUidValidity: live.uidValidity,
+    lastSeenUid,
+    liveUidValidity,
   });
 
   const replayExisting = mode !== "incremental";
@@ -291,7 +301,7 @@ async function scanMailbox({
 
   const highestServerUid = serverUids.reduce(
     (highest, uid) => (uid > highest ? uid : highest),
-    stored?.lastSeenUid ?? BigInt(0),
+    lastSeenUid,
   );
 
   return {
@@ -306,7 +316,11 @@ async function scanMailbox({
       mode === "incremental" && live.exists > 0
         ? diffFlags(
             indexed,
-            await fetchLiveFlags(client, stored?.highestModseq ?? null),
+            await fetchLiveFlags(
+              client,
+              scanRange,
+              stored?.highestModseq ?? null,
+            ),
           )
         : [],
     // Stop at the last fetched UID so the rest arrives on the next run.
@@ -653,10 +667,14 @@ export function getMailboxRole(folder: {
 }
 
 /** CHANGEDSINCE keeps this cheap. Other servers report every flag, every run. */
-async function fetchLiveFlags(client: ImapFlow, sinceModseq: bigint | null) {
+async function fetchLiveFlags(
+  client: ImapFlow,
+  uidRange: string,
+  sinceModseq: bigint | null,
+) {
   const flags: { uid: bigint; flags: string[] }[] = [];
   for await (const message of client.fetch(
-    "1:*",
+    uidRange,
     { uid: true, flags: true },
     { uid: true, ...(sinceModseq ? { changedSince: sinceModseq } : {}) },
   )) {
@@ -668,8 +686,8 @@ async function fetchLiveFlags(client: ImapFlow, sinceModseq: bigint | null) {
   return flags;
 }
 
-async function searchAllUids(client: ImapFlow) {
-  const uids = await client.search({ all: true }, { uid: true });
+async function searchUids(client: ImapFlow, uidRange: string) {
+  const uids = await client.search({ uid: uidRange }, { uid: true });
   if (!Array.isArray(uids)) throw new Error("IMAP search failed");
   return uids.map(BigInt);
 }

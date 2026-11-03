@@ -105,6 +105,25 @@ export function diffMailbox({
   return { newUids, vanished };
 }
 
+/** Older messages are outside the index, so nothing below this can change it. */
+export function getScanStartUid({
+  indexed,
+  lastSeenUid,
+  liveUidValidity,
+}: {
+  indexed: readonly IndexedMessage[];
+  lastSeenUid: bigint;
+  liveUidValidity: bigint;
+}) {
+  return indexed.reduce<bigint>(
+    (lowest, message) =>
+      message.uidValidity === liveUidValidity && message.uid < lowest
+        ? message.uid
+        : lowest,
+    lastSeenUid + BigInt(1),
+  );
+}
+
 /**
  * Pairs vanished rows with messages that appeared elsewhere, so a moved message
  * keeps its app ID and is not reported as new mail.

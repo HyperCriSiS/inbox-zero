@@ -12,6 +12,22 @@ import {
   getGmailFilterSettingsUrl,
 } from "./url";
 
+describe("IMAP links", () => {
+  it("stay in the app instead of falling back to Gmail", () => {
+    const url = getEmailUrlForMessage("m1", "t1", "me@web.de", "imap");
+
+    expect(url).not.toContain("google.com");
+    expect(url.endsWith("/mail")).toBe(true);
+  });
+
+  it("search the app's own mail view", () => {
+    const url = getEmailSearchUrl("ana@example.org", "me@web.de", "imap");
+
+    expect(url).not.toContain("google.com");
+    expect(url.endsWith("/mail?q=from%3Aana%40example.org")).toBe(true);
+  });
+});
+
 describe("createSearchParams", () => {
   it("coerces primitive and array values to URLSearchParams strings", () => {
     const after = new Date("2026-07-01T00:00:00.000Z");

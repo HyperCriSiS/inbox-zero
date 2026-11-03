@@ -50,6 +50,11 @@ import {
 } from "@/utils/imap/smtp";
 import { ensureIndexed } from "@/utils/imap/index-messages";
 import { parseMessageIds, resolveThread } from "@/utils/imap/thread";
+import {
+  matchesThreadFilter,
+  parseThreadQuery,
+  type ThreadScope,
+} from "@/utils/imap/thread-query";
 import { inboxZeroLabels, type InboxZeroLabel } from "@/utils/label";
 import type { Logger } from "@/utils/logger";
 import { convertEmailHtmlToText } from "@/utils/mail";
@@ -255,7 +260,16 @@ export class ImapProvider implements EmailProvider {
       pageToken: options.pageToken,
     });
 
-    return { messages: await this.readRows(rows), nextPageToken };
+    const messages = await this.readRows(rows);
+    if (!options.labelName) return { messages, nextPageToken };
+
+    const label = await this.getLabelByName(options.labelName);
+    return {
+      messages: messages.filter((message) =>
+        message.labelIds?.includes(label?.id ?? options.labelName ?? ""),
+      ),
+      nextPageToken,
+    };
   }
 
   async searchThreads(options: {
@@ -314,28 +328,25 @@ export class ImapProvider implements EmailProvider {
       });
     }
 
-    const mailbox = query?.labelId
-      ? await this.resolveLabelMailbox(query.labelId)
-      : await this.requireMailbox("inbox");
-    const { rows, nextPageToken } = await this.searchMailbox({
-      mailbox,
-      criteria: {
-        ...(query?.fromEmail && { from: query.fromEmail }),
-        ...(query?.isUnread && { seen: false }),
-        ...(query?.before && { before: query.before }),
-        ...(query?.after && { since: query.after }),
-        ...(query?.labelId &&
-          !isSystemLabel(query.labelId) &&
-          this.labelCriteria(query.labelId)),
-      },
-      maxResults: options.maxResults,
-      pageToken: options.pageToken,
-    });
+    const scope = parseThreadQuery(query);
+    const { rows, nextPageToken } = await this.findThreadQueryRows(
+      query,
+      scope,
+      { maxResults: options.maxResults, pageToken: options.pageToken },
+    );
+    const excludedLabels = await this.resolveLabelIds(query?.excludeLabelNames);
+    const messages = (await this.readRows(rows)).filter((message) =>
+      matchesThreadFilter(message, {
+        after: query?.after,
+        before: query?.before,
+        excludedLabels,
+        fromEmail: query?.fromEmail,
+        labels: scope.labels,
+        unread: scope.unread,
+      }),
+    );
 
-    return {
-      threads: await this.toThreads(await this.readRows(rows)),
-      nextPageToken,
-    };
+    return { threads: await this.toThreads(messages), nextPageToken };
   }
 
   async getThreadsWithLabel(options: { labelId: string; maxResults?: number }) {
@@ -468,12 +479,22 @@ export class ImapProvider implements EmailProvider {
   }
 
   async countMessages(options: { folderId?: string; labelId?: string }) {
-    const mailbox = options.folderId
-      ? await this.requireMailboxByPath(options.folderId)
+    const { labelId, folderId } = options;
+    const { connectionId, labelStrategy } = this.account;
+    if (labelId && labelStrategy === "database") {
+      return prisma.imapMessage.count({
+        where: { connectionId, labels: { has: labelId } },
+      });
+    }
+
+    const folderPath =
+      folderId ?? (labelStrategy === "folders" ? labelId : undefined);
+    const mailbox = folderPath
+      ? await this.requireMailboxByPath(folderPath)
       : await this.requireMailbox("inbox");
     return this.withClient(async (client) => {
       const uids = await searchUids(client, mailbox.path, {
-        ...(options.labelId && this.labelCriteria(options.labelId)),
+        ...(labelId && this.labelCriteria(labelId)),
       });
       return uids.length;
     });
@@ -666,9 +687,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   async getLabelByName(name: string) {
-    const wanted = (
-      this.account.labelStrategy === "folders" ? toLabelFolderName(name) : name
-    ).toLowerCase();
+    const wanted = this.toComparableLabel(name);
     const labels = await this.getLabels();
     return labels.find((label) => label.name.toLowerCase() === wanted) ?? null;
   }
@@ -1506,6 +1525,94 @@ export class ImapProvider implements EmailProvider {
     });
   }
 
+  private async findThreadQueryRows(
+    query: ThreadsQuery | undefined,
+    scope: ThreadScope,
+    page: { maxResults?: number; pageToken?: string },
+  ) {
+    const usesLabelFolders = this.account.labelStrategy === "folders";
+    const folderPath =
+      query?.folderId ??
+      (usesLabelFolders && !scope.role ? scope.labels[0] : undefined);
+    const singleFolder =
+      folderPath || (scope.role && (usesLabelFolders || !scope.labels.length));
+
+    if (singleFolder) {
+      const mailbox = folderPath
+        ? await this.findMailboxByPath(folderPath)
+        : await this.findMailbox(scope.role as ImapMailboxRole);
+      if (!mailbox) return { rows: [] };
+
+      return this.searchMailbox({
+        mailbox,
+        criteria: {
+          ...(query?.fromEmail && { from: query.fromEmail }),
+          ...(scope.unread && { seen: false }),
+          ...(scope.starred && { flagged: true }),
+          ...(query?.before && { before: query.before }),
+          ...(query?.after && { since: query.after }),
+        },
+        ...page,
+      });
+    }
+
+    return this.findIndexedRows(scope, page);
+  }
+
+  /** Labels live on single messages, and those can sit in any folder. */
+  private async findIndexedRows(
+    scope: ThreadScope,
+    page: { maxResults?: number; pageToken?: string },
+  ) {
+    const offset = page.pageToken ? Number(page.pageToken) : 0;
+    const maxResults = page.maxResults ?? DEFAULT_PAGE_SIZE;
+    const rows = await prisma.imapMessage.findMany({
+      where: {
+        connectionId: this.account.connectionId,
+        mailbox: scope.role
+          ? { role: scope.role }
+          : {
+              OR: [{ role: null }, { role: { notIn: ["trash", "junk"] } }],
+              NOT: { path: { startsWith: "Labels/" } },
+            },
+        ...this.labelRowFilter(scope.labels),
+        ...(scope.starred && { flags: { has: "\\Flagged" } }),
+      },
+      include: messageRowInclude,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: offset,
+      take: maxResults + 1,
+    });
+
+    return {
+      rows: rows.slice(0, maxResults) as MessageRow[],
+      nextPageToken:
+        rows.length > maxResults ? String(offset + maxResults) : undefined,
+    };
+  }
+
+  private labelRowFilter(labels: string[]) {
+    if (!labels.length) return {};
+    return this.account.labelStrategy === "database"
+      ? { labels: { hasEvery: labels } }
+      : { flags: { hasEvery: labels.map(labelToKeyword) } };
+  }
+
+  private async resolveLabelIds(names: readonly string[] | null | undefined) {
+    if (!names?.length) return [];
+    const labels = await this.getLabels();
+    const wanted = new Set(names.map((name) => this.toComparableLabel(name)));
+    return labels
+      .filter((label) => wanted.has(label.name.toLowerCase()))
+      .map((label) => label.id);
+  }
+
+  private toComparableLabel(name: string) {
+    return (
+      this.account.labelStrategy === "folders" ? toLabelFolderName(name) : name
+    ).toLowerCase();
+  }
+
   private async listAllMessages(options: {
     maxResults?: number;
     pageToken?: string;
@@ -1594,15 +1701,7 @@ export class ImapProvider implements EmailProvider {
     const toMove = rows.filter((row) => row.mailbox.path !== targetPath);
     if (!toMove.length) return;
 
-    const target = await prisma.imapMailbox.findUnique({
-      where: {
-        connectionId_path: {
-          connectionId: this.account.connectionId,
-          path: targetPath,
-        },
-      },
-      select: { id: true },
-    });
+    const { connectionId } = this.account;
 
     await this.withClient(async (client) => {
       for (const group of groupByMailbox(toMove)) {
@@ -1616,7 +1715,19 @@ export class ImapProvider implements EmailProvider {
           if (!result) throw new Error("IMAP move failed");
 
           // Without COPYUID the next sync re-links the rows by Message-ID.
-          if (target && result.uidMap && result.uidValidity) {
+          if (result.uidMap && result.uidValidity) {
+            // A folder created for this move is not indexed yet, and the next
+            // action on these rows must already find them there.
+            const target = await prisma.imapMailbox.upsert({
+              where: { connectionId_path: { connectionId, path: targetPath } },
+              create: {
+                connectionId,
+                path: targetPath,
+                uidValidity: BigInt(result.uidValidity),
+              },
+              update: {},
+              select: { id: true },
+            });
             await prisma.$transaction(
               group.rows.flatMap((row) => {
                 const uid = result.uidMap?.get(Number(row.uid));
@@ -1764,13 +1875,17 @@ export class ImapProvider implements EmailProvider {
     return mailbox;
   }
 
-  private async requireMailboxByPath(path: string) {
-    const mailbox = await prisma.imapMailbox.findUnique({
+  private async findMailboxByPath(path: string) {
+    return prisma.imapMailbox.findUnique({
       where: {
         connectionId_path: { connectionId: this.account.connectionId, path },
       },
       select: { id: true, path: true },
     });
+  }
+
+  private async requireMailboxByPath(path: string) {
+    const mailbox = await this.findMailboxByPath(path);
     if (!mailbox) throw new Error("Folder not found");
     return mailbox;
   }
@@ -1783,15 +1898,6 @@ export class ImapProvider implements EmailProvider {
     // Servers without an archive folder are common, and archiving must still work.
     const path = await this.getOrCreateFolderIdByName("Archive");
     return { id: "", path };
-  }
-
-  private async resolveLabelMailbox(labelId: string) {
-    const role = SYSTEM_LABEL_ROLES[labelId];
-    if (role) return this.requireMailbox(role);
-    if (this.account.labelStrategy === "folders") {
-      return this.requireMailboxByPath(labelId);
-    }
-    return this.requireMailbox("inbox");
   }
 
   private async resolveSearchMailbox(options: {
@@ -1826,7 +1932,7 @@ export class ImapProvider implements EmailProvider {
 
   // Some servers file sent mail themselves, so a blind APPEND would duplicate it.
   private async storeSentCopy(raw: Buffer, messageId: string) {
-    // Proton Mail Bridge files it seconds later, too late for the search below.
+    // Proton Mail Bridge files it up to 40 seconds later, too late for the search below.
     if (this.account.labelStrategy === "folders") return;
 
     const mailbox = await this.findMailbox("sent");
@@ -1956,14 +2062,6 @@ export class ImapProvider implements EmailProvider {
   }
 }
 
-const SYSTEM_LABEL_ROLES: Record<string, ImapMailboxRole> = {
-  INBOX: "inbox",
-  SENT: "sent",
-  DRAFT: "drafts",
-  TRASH: "trash",
-  SPAM: "junk",
-};
-
 const ROLE_SYSTEM_FOLDERS: Record<string, OutlookSystemFolder> = {
   inbox: "INBOX",
   sent: "SENT",
@@ -1995,10 +2093,6 @@ function decodeSyncCursor(cursor: string) {
   const match = cursor.match(/^imap:(\d+)$/);
   if (!match) throw new InvalidMailboxSyncCursorError();
   return BigInt(match[1]);
-}
-
-function isSystemLabel(labelId: string) {
-  return labelId in SYSTEM_LABEL_ROLES;
 }
 
 function toLabel(id: string, name: string): EmailLabel {

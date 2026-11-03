@@ -19,6 +19,7 @@ import { ImapFlow } from "imapflow";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { createTestLogger } from "@/__tests__/helpers";
 import { ImapProvider } from "@/utils/email/imap";
+import { processAccountFollowUps } from "@/utils/follow-up/process";
 import { getImapConfig } from "@/utils/imap/config";
 import { syncImapAccount } from "@/utils/imap/sync";
 import prisma from "@/utils/prisma";
@@ -46,12 +47,14 @@ const PLAIN = !!process.env.IMAP_TEST_PLAIN;
 const IMAP_PORT = Number(process.env.IMAP_TEST_PORT ?? 31_143);
 const SMTP_PORT = 31_025;
 const MAILPIT_API = "http://127.0.0.1:38025/api/v1";
-const PASSWORD = "testpass";
+const PASSWORD = process.env.IMAP_TEST_PASSWORD ?? "testpass";
 
 vi.setConfig({ testTimeout: 30_000 });
 
 describe.skipIf(!RUN)("IMAP provider against a real server", () => {
-  const username = `user-${randomUUID().slice(0, 8)}`;
+  // Dovecot creates users on login. Other servers need a prepared account.
+  const username =
+    process.env.IMAP_TEST_USER ?? `user-${randomUUID().slice(0, 8)}`;
   const email = `${username}@example.com`;
   const logger = createTestLogger();
   let userId: string;
@@ -75,6 +78,7 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
       subject?: string;
       references?: string;
       body?: string;
+      date?: Date;
       extraHeaders?: string;
     } = {},
   ) {
@@ -83,7 +87,7 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
       `To: ${email}`,
       `Subject: ${options.subject ?? `Subject ${id}`}`,
       `Message-ID: <${id}>`,
-      `Date: ${new Date().toUTCString()}`,
+      `Date: ${(options.date ?? new Date()).toUTCString()}`,
       ...(options.references
         ? [
             `References: <${options.references}>`,
@@ -99,6 +103,8 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     await client.append(
       options.folder ?? "INBOX",
       Buffer.from(lines.join("\r\n")),
+      [],
+      options.date,
     );
   }
 
@@ -640,6 +646,158 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     await prisma.imapConnection.update({
       where: { id: connectionId },
       data: { changesPrunedThrough: BigInt(0) },
+    });
+  });
+
+  test("an action right after a move to a new folder still applies", async () => {
+    await deliver("newfolder@x");
+    await sync();
+    const before = await row("newfolder@x");
+
+    await provider.moveThreadToFolder(before.threadId, email, "Ganz Neu");
+    await provider.markReadThread(before.threadId, true);
+
+    const after = await row("newfolder@x");
+    expect(after.mailbox.path).toBe("Ganz Neu");
+    expect((await provider.getMessage(before.id)).labelIds).not.toContain(
+      "UNREAD",
+    );
+  });
+
+  test("a label query finds labeled mail in any folder and nothing else", async () => {
+    await deliver("query-inbox@x", { subject: "Query inbox" });
+    await deliver("query-moved@x", { subject: "Query moved" });
+    await deliver("query-other@x", { subject: "Query other" });
+    await sync();
+    const inInbox = await row("query-inbox@x");
+    const moved = await row("query-moved@x");
+    const label = await provider.createLabel("Abfrage");
+    for (const target of [inInbox, moved]) {
+      await provider.labelMessage({
+        messageId: target.id,
+        labelId: label.id,
+        labelName: label.name,
+      });
+    }
+    await provider.archiveThread(moved.threadId, email);
+    await sync();
+
+    const { threads } = await provider.getThreadsWithQuery({
+      query: { labelId: label.id },
+    });
+
+    expect(threads.map((thread) => thread.id).toSorted()).toEqual(
+      [inInbox.threadId, moved.threadId].toSorted(),
+    );
+
+    const inboxOnly = await provider.getThreadsWithQuery({
+      query: { labelIds: ["INBOX", label.id] },
+    });
+    expect(inboxOnly.threads.map((thread) => thread.id)).toEqual([
+      inInbox.threadId,
+    ]);
+  });
+
+  test("thread queries honor type, unread and excluded labels", async () => {
+    await deliver("types-read@x", { subject: "Types read" });
+    await deliver("types-unread@x", { subject: "Types unread" });
+    await deliver("types-excluded@x", { subject: "Types excluded" });
+    await sync();
+    const read = await row("types-read@x");
+    const unread = await row("types-unread@x");
+    const excluded = await row("types-excluded@x");
+    await provider.markMessagesReadState([read.id], true);
+    const label = await provider.createLabel("Bereinigt");
+    await provider.labelMessage({
+      messageId: excluded.id,
+      labelId: label.id,
+      labelName: label.name,
+    });
+    await sync();
+
+    const { threads } = await provider.getThreadsWithQuery({
+      query: {
+        labelIds: ["INBOX", "UNREAD"],
+        excludeLabelNames: ["Bereinigt"],
+      },
+      maxResults: 50,
+    });
+    const ids = threads.map((thread) => thread.id);
+
+    expect(ids).toContain(unread.threadId);
+    expect(ids).not.toContain(read.threadId);
+    expect(ids).not.toContain(excluded.threadId);
+
+    const archive = await provider.getThreadsWithQuery({
+      query: { type: "archive" },
+      maxResults: 50,
+    });
+    expect(archive.threads.map((thread) => thread.id)).not.toContain(
+      unread.threadId,
+    );
+  });
+
+  test.each([
+    "own",
+    "database",
+  ] as const)("follow-ups reach only labeled sent mail with %s labels", async (mode) => {
+    const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    await deliver(`followup-sent-${mode}@x`, {
+      folder: "Sent",
+      date: old,
+      subject: `Follow-up sent ${mode}`,
+    });
+    await deliver(`followup-inbox-${mode}@x`, {
+      date: old,
+      subject: `Follow-up inbox ${mode}`,
+    });
+    await sync();
+    const sent = await row(`followup-sent-${mode}@x`);
+    const untouched = await row(`followup-inbox-${mode}@x`);
+    const previous = (await getImapConfig(emailAccountId)).labelStrategy;
+    if (mode === "database") {
+      await prisma.imapConnection.update({
+        where: { id: connectionId },
+        data: { labelStrategy: "database" },
+      });
+    }
+    const account = await getImapConfig(emailAccountId);
+    const labeled = new ImapProvider(account, logger);
+    const label = await labeled.createLabel("Awaiting Reply");
+    await labeled.labelMessage({
+      messageId: sent.id,
+      labelId: label.id,
+      labelName: label.name,
+    });
+    if (mode === "own") await sync();
+
+    await processAccountFollowUps({
+      emailAccount: {
+        id: emailAccountId,
+        email,
+        userId,
+        followUpAwaitingReplyDays: 1,
+        followUpNeedsReplyDays: null,
+        followUpAutoDraftEnabled: false,
+        timezone: null,
+        account: { provider: "imap" },
+        user: { aiProvider: null, aiModel: null, aiApiKey: null },
+      } as never,
+      logger,
+    });
+
+    const trackers = await prisma.threadTracker.findMany({
+      where: { emailAccountId },
+      select: { threadId: true },
+    });
+    const threadIds = trackers.map((tracker) => tracker.threadId);
+    expect(threadIds).toContain(sent.threadId);
+    expect(threadIds).not.toContain(untouched.threadId);
+
+    await prisma.threadTracker.deleteMany({ where: { emailAccountId } });
+    await prisma.imapConnection.update({
+      where: { id: connectionId },
+      data: { labelStrategy: previous },
     });
   });
 

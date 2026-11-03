@@ -116,6 +116,22 @@ const GOOGLE_CONFIG: ProviderUrlConfig = {
     ),
 };
 
+// IMAP has no web client to link to, so links open the app's own mail view.
+// Links also leave the app in emails, which need the full address.
+function getAppMailUrl(query?: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "";
+  return `${baseUrl}/mail${query ? `?q=${encodeURIComponent(query)}` : ""}`;
+}
+
+const IMAP_CONFIG: ProviderUrlConfig = {
+  requiresMessageId: false,
+  buildUrl: () => getAppMailUrl(),
+  buildDraftUrl: () => getAppMailUrl(),
+  selectId: (_messageId: string, threadId: string) => threadId,
+  buildSearchUrl: (field: SearchField, address: string) =>
+    getAppMailUrl(`${field}:${address}`),
+};
+
 const PROVIDER_CONFIG: Record<string, ProviderUrlConfig> = {
   microsoft: {
     requiresMessageId: true,
@@ -142,6 +158,7 @@ const PROVIDER_CONFIG: Record<string, ProviderUrlConfig> = {
     },
   },
   google: GOOGLE_CONFIG,
+  imap: IMAP_CONFIG,
   default: {
     ...GOOGLE_CONFIG,
     selectId: (_messageId: string, threadId: string) => threadId,

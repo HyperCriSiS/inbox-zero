@@ -2,12 +2,45 @@ import { describe, expect, it } from "vitest";
 import {
   diffFlags,
   diffMailbox,
+  getScanStartUid,
   type IndexedMessage,
   isSyncableFolder,
   matchMovedMessages,
   planMailboxSync,
   shouldEnqueueForRules,
 } from "@/utils/imap/sync-plan";
+
+describe("getScanStartUid", () => {
+  it("starts at the oldest indexed message", () => {
+    expect(
+      getScanStartUid({
+        indexed: [row(900), row(700), row(800)],
+        lastSeenUid: BigInt(900),
+        liveUidValidity: BigInt(1),
+      }),
+    ).toBe(BigInt(700));
+  });
+
+  it("ignores rows from an older UIDVALIDITY", () => {
+    expect(
+      getScanStartUid({
+        indexed: [row(5, { uidValidity: BigInt(9) }), row(700)],
+        lastSeenUid: BigInt(700),
+        liveUidValidity: BigInt(1),
+      }),
+    ).toBe(BigInt(700));
+  });
+
+  it("starts after the last seen UID when nothing is indexed", () => {
+    expect(
+      getScanStartUid({
+        indexed: [],
+        lastSeenUid: BigInt(41),
+        liveUidValidity: BigInt(1),
+      }),
+    ).toBe(BigInt(42));
+  });
+});
 
 describe("isSyncableFolder", () => {
   it("skips virtual folders flagged in LIST without SPECIAL-USE", () => {
