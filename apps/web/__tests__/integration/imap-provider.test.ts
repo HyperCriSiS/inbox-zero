@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { APICallError } from "ai";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { ImapFlow } from "imapflow";
@@ -207,6 +208,40 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     expect(input.message?.labelIds).toEqual(
       expect.arrayContaining(["INBOX", "UNREAD"]),
     );
+  });
+
+  test("an AI outage keeps new mail pending without using up attempts", async () => {
+    const callsBefore = newMailCalls();
+    vi.mocked(processHistoryItem).mockRejectedValueOnce(
+      new APICallError({
+        message: "Service Unavailable",
+        url: "https://api.example.com/v1/chat",
+        requestBodyValues: {},
+        statusCode: 503,
+      }),
+    );
+    await deliver("outage-1@x");
+    await deliver("outage-2@x");
+
+    await sync();
+
+    // The first failure stops the run, so the second message is not tried.
+    expect(newMailCalls() - callsBefore).toBe(1);
+    const ids = [(await row("outage-1@x")).id, (await row("outage-2@x")).id];
+    const pending = await prisma.imapSyncItem.findMany({
+      where: { connectionId, messageId: { in: ids }, processedAt: null },
+    });
+    expect(pending).toHaveLength(2);
+    expect(pending.map((item) => item.attempts)).toEqual([0, 0]);
+
+    await sync();
+
+    expect(newMailCalls() - callsBefore).toBe(3);
+    await expect(
+      prisma.imapSyncItem.count({
+        where: { connectionId, messageId: { in: ids }, processedAt: null },
+      }),
+    ).resolves.toBe(0);
   });
 
   test("a reply joins the thread and both bodies are readable", async () => {

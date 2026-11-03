@@ -71,8 +71,9 @@ The app asks the server what it supports, so no provider is special-cased.
 - Rules and sender filters, such as auto-archive, run in the app when new mail is
   synced. Contact search, signatures and contact photos are not available.
 - Rules for a message are tried on five polls, then it is skipped so one broken
-  message cannot block the queue. An AI outage of several minutes can therefore leave
-  new mail without rules.
+  message cannot block the queue. An outage of the AI provider, such as rate limits,
+  overload or a dropped connection, does not count as a try: the poll stops and the
+  message is tried again on the next one, for up to three days.
 - Without CONDSTORE, as on Proton Mail Bridge, every poll compares the indexed range
   of every folder. A test mailbox with 60,000 messages in 9 folders took under 2
   seconds per poll, and about 6 seconds with 72 folders.

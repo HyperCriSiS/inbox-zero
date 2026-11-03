@@ -13,6 +13,7 @@ import {
   withImapClient,
 } from "@/utils/imap/connection";
 import type { ImapMailboxRole } from "@/utils/imap/message";
+import { isTemporaryFailure } from "@/utils/imap/temporary-failure";
 import {
   diffFlags,
   diffMailbox,
@@ -49,6 +50,10 @@ const BASELINE_WINDOW = 1000;
 const MAX_NEW_MESSAGES_PER_RUN = 500;
 const MAX_PENDING_PER_RUN = 100;
 const MAX_ATTEMPTS = 5;
+// A provider outage keeps a message pending without counting as an attempt.
+const MAX_TEMPORARY_FAILURE_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+const TEMPORARY_FAILURE_MESSAGE =
+  "Temporarily unavailable, will retry; see server logs.";
 const ACCOUNT_CONCURRENCY = 3;
 const IMAP_SYNC_QUEUE = "imap-sync";
 
@@ -536,7 +541,7 @@ async function processPendingMessages({
         where: { processedAt: null },
         orderBy: [{ attempts: "asc" }, { createdAt: "asc" }],
         take: MAX_PENDING_PER_RUN,
-        select: { messageId: true, attempts: true },
+        select: { messageId: true, attempts: true, createdAt: true },
       },
     },
   });
@@ -614,6 +619,21 @@ async function processPendingMessages({
         messageId: item.messageId,
         error,
       });
+
+      // An overloaded or rate limited AI provider fails every message the
+      // same way, so stop here and try again on a later poll without using up
+      // the attempts. Only give up once the message has waited too long.
+      if (
+        isTemporaryFailure(error) &&
+        Date.now() - item.createdAt.getTime() < MAX_TEMPORARY_FAILURE_AGE_MS
+      ) {
+        await prisma.imapSyncItem.update({
+          where: key,
+          data: { lastError: TEMPORARY_FAILURE_MESSAGE },
+        });
+        break;
+      }
+
       const attempts = item.attempts + 1;
       await prisma.imapSyncItem.update({
         where: key,
