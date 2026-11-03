@@ -50,8 +50,10 @@ export function CalDavCalendarForm({ disabled }: { disabled?: boolean }) {
       },
       onError: ({ error }) =>
         toastError({
-          description:
-            getActionErrorMessage(error) ?? "Could not connect the calendar.",
+          description: getActionErrorMessage(
+            error,
+            "Could not connect the calendar.",
+          ),
         }),
     },
   );

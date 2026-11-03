@@ -595,6 +595,7 @@
                                   "type": "string",
                                   "enum": [
                                     "LABEL",
+                                    "REMOVE_LABEL",
                                     "ARCHIVE",
                                     "MARK_READ",
                                     "STAR",
@@ -876,6 +877,7 @@
                           "type": "string",
                           "enum": [
                             "LABEL",
+                            "REMOVE_LABEL",
                             "ARCHIVE",
                             "MARK_READ",
                             "STAR",
@@ -1076,6 +1078,7 @@
                                 "type": "string",
                                 "enum": [
                                   "LABEL",
+                                  "REMOVE_LABEL",
                                   "ARCHIVE",
                                   "MARK_READ",
                                   "STAR",
@@ -1402,6 +1405,7 @@
                                 "type": "string",
                                 "enum": [
                                   "LABEL",
+                                  "REMOVE_LABEL",
                                   "ARCHIVE",
                                   "MARK_READ",
                                   "STAR",
@@ -1712,6 +1716,7 @@
                           "type": "string",
                           "enum": [
                             "LABEL",
+                            "REMOVE_LABEL",
                             "ARCHIVE",
                             "MARK_READ",
                             "STAR",
@@ -1912,6 +1917,7 @@
                                 "type": "string",
                                 "enum": [
                                   "LABEL",
+                                  "REMOVE_LABEL",
                                   "ARCHIVE",
                                   "MARK_READ",
                                   "STAR",
