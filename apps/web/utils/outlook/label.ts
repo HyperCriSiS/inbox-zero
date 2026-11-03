@@ -525,6 +525,26 @@ async function moveThreadFromFolderToInbox({
     );
   }
 
+  await moveThreadFromFolderIdToInbox({
+    client,
+    threadId,
+    folderId: sourceFolderId,
+    logger,
+  });
+}
+
+/** Moves the messages of a conversation that sit in one folder to the inbox. */
+export async function moveThreadFromFolderIdToInbox({
+  client,
+  threadId,
+  folderId: sourceFolderId,
+  logger,
+}: {
+  client: OutlookClient;
+  threadId: string;
+  folderId: string;
+  logger: Logger;
+}) {
   const messages = await listThreadMessages({
     client,
     threadId,

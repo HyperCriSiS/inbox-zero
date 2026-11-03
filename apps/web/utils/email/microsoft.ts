@@ -55,6 +55,7 @@ import {
   archiveThread,
   markReadThread,
   markStarredMessage,
+  moveThreadFromFolderIdToInbox,
   removeThreadLabel,
   unarchiveThread,
   untrashThread,
@@ -2565,6 +2566,25 @@ export class OutlookProvider implements EmailProvider {
     await this.moveMessageSnapshots(messageIds, "inbox");
   }
 
+  async moveMessagesToFolder(
+    messageIds: string[],
+    folderId: string,
+  ): Promise<void> {
+    await this.moveMessageSnapshots(messageIds, folderId);
+  }
+
+  async moveThreadFromFolderToInbox(
+    threadId: string,
+    folderId: string,
+  ): Promise<void> {
+    await moveThreadFromFolderIdToInbox({
+      client: this.client,
+      threadId,
+      folderId,
+      logger: this.logger,
+    });
+  }
+
   async markMessagesStarredState(
     messageIds: string[],
     starred: boolean,
@@ -2605,7 +2625,7 @@ export class OutlookProvider implements EmailProvider {
 
   private async moveMessageSnapshots(
     messageIds: string[],
-    destinationId: "archive" | "deleteditems" | "inbox",
+    destinationId: string,
   ) {
     await mapWithConcurrency([...new Set(messageIds)], 4, async (messageId) => {
       try {

@@ -589,6 +589,21 @@ export class ImapProvider implements EmailProvider {
     await this.moveRows(await this.findThreadRows(threadId), path);
   }
 
+  async moveMessagesToFolder(messageIds: string[], folderId: string) {
+    await this.moveRows(
+      await this.findRows({ id: { in: messageIds } }),
+      folderId,
+    );
+  }
+
+  async moveThreadFromFolderToInbox(threadId: string, folderId: string) {
+    const rows = await this.findThreadRows(threadId);
+    await this.moveToRole(
+      rows.filter((row) => row.mailbox.path === folderId),
+      "inbox",
+    );
+  }
+
   async markRead(threadId: string) {
     await this.markReadThread(threadId, true);
   }

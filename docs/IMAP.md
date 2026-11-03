@@ -34,6 +34,7 @@ INBOX_ZERO_IMAGE=inbox-zero-imap INBOX_ZERO_PULL_POLICY=never docker compose up 
 | --- | --- |
 | `IMAP_ALLOW_PRIVATE_HOSTS` | Allows servers on private addresses, such as Proton Mail Bridge. Disables SSRF protection, so use it on trusted single-tenant installs only. |
 | `IMAP_ALLOW_PLAINTEXT` | Allows the security option `None`, which sends the password unencrypted. |
+| `REVIEW_BEFORE_DELETE_LABEL` | Nothing goes to Trash or Spam. Rules, the chat, bulk actions and the mail view move that mail to this folder (a label on Gmail) instead, for you to check and empty. Undo brings it back to the inbox. Works for every provider. |
 | `NEXT_PUBLIC_AUTH_PASSWORD_ENABLED` | Enables password sign-in without Google or Microsoft. Needs an allowlist below, otherwise it stays off. |
 | `AUTH_ALLOWED_EMAILS`, `AUTH_ALLOWED_EMAIL_DOMAINS` | Limit who can sign up. Set these on any install reachable by others, because a linked address is not verified as belonging to the user. |
 

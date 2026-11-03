@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { createTestLogger } from "@/__tests__/helpers";
 import { ImapProvider } from "@/utils/email/imap";
 import { processAccountFollowUps } from "@/utils/follow-up/process";
+import { withReviewBeforeDelete } from "@/utils/email/review-before-delete";
 import { getImapConfig } from "@/utils/imap/config";
 import { syncImapAccount } from "@/utils/imap/sync";
 import prisma from "@/utils/prisma";
@@ -662,6 +663,29 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     expect((await provider.getMessage(before.id)).labelIds).not.toContain(
       "UNREAD",
     );
+  });
+
+  test("review mode moves trash and spam to a folder and back", async () => {
+    await deliver("review-thread@x");
+    await deliver("review-message@x");
+    await sync();
+    const thread = await row("review-thread@x");
+    const message = await row("review-message@x");
+    const reviewed = withReviewBeforeDelete(provider, "Zu pruefen", logger);
+    const reviewPath = await provider.getOrCreateFolderIdByName("Zu pruefen");
+
+    await reviewed.trashThread(thread.threadId, email, "automation");
+    await reviewed.trashMessages([message.id]);
+
+    expect((await row("review-thread@x")).mailbox.path).toBe(reviewPath);
+    expect((await row("review-message@x")).mailbox.path).toBe(reviewPath);
+    expect((await row("review-thread@x")).id).toBe(thread.id);
+
+    await reviewed.untrashThread(thread.threadId);
+    expect((await row("review-thread@x")).mailbox.role).toBe("inbox");
+
+    await reviewed.markSpam(message.threadId);
+    expect((await row("review-message@x")).mailbox.path).toBe(reviewPath);
   });
 
   test("a label query finds labeled mail in any folder and nothing else", async () => {

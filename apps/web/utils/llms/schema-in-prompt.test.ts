@@ -61,9 +61,9 @@ describe("canMoveSchemaToPrompt", () => {
   });
 
   it("skips arrays and enums", () => {
-    expect(canMoveSchemaToPrompt({ schema, prompt: "hi", output: "array" })).toBe(
-      false,
-    );
+    expect(
+      canMoveSchemaToPrompt({ schema, prompt: "hi", output: "array" }),
+    ).toBe(false);
   });
 });
 

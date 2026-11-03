@@ -597,7 +597,10 @@ export function createGenerateObject({
         try {
           result = await generateObject<SCHEMA, OUTPUT, RESULT>(request);
         } catch (error) {
-          if (!isSchemaTooComplexError(error) || !canMoveSchemaToPrompt(request))
+          if (
+            !isSchemaTooComplexError(error) ||
+            !canMoveSchemaToPrompt(request)
+          )
             throw error;
 
           logger.warn("Provider rejected the schema, moving it to the prompt", {

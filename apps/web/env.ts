@@ -247,6 +247,7 @@ const parsedEnv = createEnv({
     // deployment — never on a shared/multi-tenant instance.
     WEBHOOK_ALLOW_PRIVATE_IPS: booleanString.optional().default(false),
     IMAP_ALLOW_PRIVATE_HOSTS: booleanString.optional().default(false),
+    REVIEW_BEFORE_DELETE_LABEL: z.string().trim().optional(),
     IMAP_ALLOW_PLAINTEXT: booleanString.optional().default(false),
     DIGEST_MAX_SUMMARIES_PER_24H: z.coerce
       .number()
