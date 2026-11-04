@@ -107,6 +107,11 @@ itself. Calendars shared with you without write access are never booked into.
 - Without CONDSTORE, as on Proton Mail Bridge, every poll compares the indexed range
   of every folder. A test mailbox with 60,000 messages in 9 folders took under 2
   seconds per poll, and about 6 seconds with 72 folders.
+- **Bulk Process Emails** can run in the background on the server, so a large
+  backfill keeps going with the tab closed. Progress is saved after every page, and
+  pause, resume and stop work from any device. It uses the same queue as the rest
+  of the app (QStash, the BullMQ worker, or the internal fallback). Trials keep the
+  run in the browser, which enforces their email limit.
 - **Label cleanup** under Assistant settings removes a label, archives or trashes the
   mail under it once every message in the thread is older than a number of days.
   It runs daily from the Compose cron at `/api/cron/label-cleanup`, up to 500 threads

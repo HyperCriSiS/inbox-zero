@@ -174,6 +174,7 @@ model EmailAccount {
   lastSyncedHistoryId            String?
   imapConnection                 ImapConnection?
   labelCleanups                  LabelCleanup[]
+  bulkRuleRuns                   BulkRuleRun[]
   behaviorProfile                Json?
   personaAnalysis                Json? // ai analysis of the user's persona
   role                           String? // the role confirmed by the user - previously `User.surveyRole`
@@ -3063,4 +3064,38 @@ model LabelCleanup {
   emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
 
   @@unique([emailAccountId, labelId])
+}
+
+enum BulkRuleRunStatus {
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+// Bulk processing of past mail, driven by a background job instead of the
+// browser, so it keeps going with the tab closed.
+model BulkRuleRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  status           BulkRuleRunStatus @default(RUNNING)
+  startDate        DateTime
+  endDate          DateTime?
+  includeRead      Boolean           @default(false)
+  rerun            Boolean           @default(false)
+  skipDraftReplies Boolean           @default(true)
+  pageToken        String?
+  processed        Int               @default(0)
+  skipped          Int               @default(0)
+  failed           Int               @default(0)
+  lastError        String?
+  finishedAt       DateTime?
+
+  emailAccountId String
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@index([emailAccountId, createdAt])
 }

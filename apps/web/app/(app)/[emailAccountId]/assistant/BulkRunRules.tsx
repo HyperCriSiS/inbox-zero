@@ -1,5 +1,6 @@
 "use client";
 
+import { ServerBulkRun } from "@/app/(app)/[emailAccountId]/assistant/ServerBulkRun";
 import { useReducer, useRef, useState } from "react";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,8 @@ export function BulkRunRules() {
   const [includeRead, setIncludeRead] = useState(false);
   const [rerun, setRerun] = useState(false);
   const [generateDraftReplies, setGenerateDraftReplies] = useState(false);
+  // Trials keep the browser run, which enforces their email cap.
+  const [runOnServer, setRunOnServer] = useState(false);
 
   const abortRef = useRef<() => void>(undefined);
 
@@ -241,7 +244,30 @@ export function BulkRunRules() {
                   onCheckedChange={setGenerateDraftReplies}
                   disabled={isBusy}
                 />
+                {!isTrial && (
+                  <>
+                    <ItemSeparator />
+                    <ToggleRow
+                      title="Run in the background on the server, with this tab closed"
+                      checked={runOnServer}
+                      onCheckedChange={setRunOnServer}
+                      disabled={isBusy}
+                    />
+                  </>
+                )}
               </ItemCard>
+
+              {runOnServer && !isTrial && emailAccountId && (
+                <ServerBulkRun
+                  emailAccountId={emailAccountId}
+                  startDate={startDate}
+                  endDate={endDate}
+                  includeRead={isIncludeReadEnabled}
+                  rerun={isRerunEnabled}
+                  generateDraftReplies={generateDraftReplies}
+                  disabled={!hasAiAccess || trialAiLimitMessage !== null}
+                />
+              )}
 
               {isTrial && (
                 <div className="flex flex-col gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 sm:flex-row sm:items-center sm:justify-between">
@@ -272,7 +298,8 @@ export function BulkRunRules() {
               )}
 
               {(state.status === "idle" || state.status === "stopped") &&
-                !isProcessing && (
+                !isProcessing &&
+                !(runOnServer && !isTrial) && (
                   <Button
                     type="button"
                     disabled={
