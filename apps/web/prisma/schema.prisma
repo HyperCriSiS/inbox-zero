@@ -173,6 +173,7 @@ model EmailAccount {
   watchEmailsSubscriptionHistory Json? // Historical Outlook subscription IDs: [{ subscriptionId, createdAt, replacedAt }]
   lastSyncedHistoryId            String?
   imapConnection                 ImapConnection?
+  labelCleanups                  LabelCleanup[]
   behaviorProfile                Json?
   personaAnalysis                Json? // ai analysis of the user's persona
   role                           String? // the role confirmed by the user - previously `User.surveyRole`
@@ -3037,4 +3038,29 @@ model ImapFilter {
   connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([connectionId, from])
+}
+
+enum LabelCleanupAction {
+  REMOVE_LABEL
+  ARCHIVE
+  TRASH
+}
+
+// Clears out mail that rules filed under a label once it is old enough.
+model LabelCleanup {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  labelId      String
+  labelName    String
+  afterDays    Int
+  action       LabelCleanupAction
+  lastRunAt    DateTime?
+  lastRunCount Int?
+
+  emailAccountId String
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([emailAccountId, labelId])
 }

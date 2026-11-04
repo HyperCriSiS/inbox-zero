@@ -23,6 +23,7 @@ import { ImapProvider } from "@/utils/email/imap";
 import { processAccountFollowUps } from "@/utils/follow-up/process";
 import { withReviewBeforeDelete } from "@/utils/email/review-before-delete";
 import { startImapIdle } from "@/utils/imap/idle";
+import { cleanUpLabel } from "@/utils/label-cleanup/run-label-cleanup";
 import { getImapConfig } from "@/utils/imap/config";
 import { syncImapAccount } from "@/utils/imap/sync";
 import prisma from "@/utils/prisma";
@@ -435,6 +436,42 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     });
     expect(learned.map((item) => item.value)).toContain("seller@cold.example");
     await prisma.rule.delete({ where: { id: coldRule.id } });
+  });
+
+  test("label cleanup clears only old mail under the label", async () => {
+    const label = await provider.createLabel("Aufraeumen");
+    const longAgo = new Date(Date.now() - 60 * 86_400_000);
+    await deliver("cleanup-old@x", { date: longAgo });
+    await deliver("cleanup-new@x");
+    await sync();
+    const oldRow = await row("cleanup-old@x");
+    const newRow = await row("cleanup-new@x");
+    await provider.labelMessage({
+      messageId: oldRow.id,
+      labelId: label.id,
+      labelName: label.name,
+    });
+    await provider.labelMessage({
+      messageId: newRow.id,
+      labelId: label.id,
+      labelName: label.name,
+    });
+
+    // Labels reach the index with the next sync, long before a daily run.
+    await sync();
+
+    const handled = await cleanUpLabel({
+      provider,
+      ownerEmail: email,
+      labelId: label.id,
+      action: "ARCHIVE",
+      olderThan: new Date(Date.now() - 30 * 86_400_000),
+      logger,
+    });
+
+    expect(handled).toBe(1);
+    expect((await row("cleanup-old@x")).mailbox.role).toBe("archive");
+    expect((await row("cleanup-new@x")).mailbox.role).toBe("inbox");
   });
 
   test("a deletion in another client removes the row", async () => {

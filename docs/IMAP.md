@@ -107,6 +107,11 @@ itself. Calendars shared with you without write access are never booked into.
 - Without CONDSTORE, as on Proton Mail Bridge, every poll compares the indexed range
   of every folder. A test mailbox with 60,000 messages in 9 folders took under 2
   seconds per poll, and about 6 seconds with 72 folders.
+- **Label cleanup** under Assistant settings removes a label, archives or trashes the
+  mail under it once every message in the thread is older than a number of days.
+  It runs daily from the Compose cron at `/api/cron/label-cleanup`, up to 500 threads
+  per label, and trash follows `REVIEW_BEFORE_DELETE_LABEL`. It works for every
+  provider.
 - Links in summary emails and notifications open the app's mail view, because IMAP
   has no web client to link to.
 - After a rejected password the account stops connecting, to avoid a lockout. Add

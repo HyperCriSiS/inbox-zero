@@ -170,7 +170,7 @@ services:
         (
           sleep 300
           while true; do
-            for job in reasoning-retention mobile-push-retention email-send-operation-retention draft-cleanup; do
+            for job in reasoning-retention mobile-push-retention email-send-operation-retention draft-cleanup label-cleanup; do
               echo \"[cron] Running $${job}...\"
               curl -fsS -X GET \"http://web:3000/api/cron/$${job}\" -H \"Authorization: Bearer $${CRON_SECRET}\" || echo \"[cron] Warning: $${job} request failed\"
             done
