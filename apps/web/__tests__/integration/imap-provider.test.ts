@@ -387,6 +387,56 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     },
   );
 
+  test("moving mail into Junk elsewhere learns a cold emailer", async (context) => {
+    await client.mailboxCreate("Junk").catch(() => undefined);
+    await sync();
+    const junk = await prisma.imapMailbox.findFirst({
+      where: { connectionId, role: "junk" },
+      select: { path: true },
+    });
+    // Only servers that mark the folder with SPECIAL-USE \Junk have a role.
+    if (!junk) return context.skip();
+
+    const coldRule = await prisma.rule.create({
+      data: {
+        emailAccountId,
+        name: "Cold email",
+        systemType: "COLD_EMAIL",
+        instructions: "Unsolicited sales email",
+        actions: { create: { type: "ARCHIVE" } },
+      },
+    });
+    await client.append(
+      "INBOX",
+      Buffer.from(
+        [
+          "From: Seller <seller@cold.example>",
+          `To: ${email}`,
+          "Subject: Grow your revenue",
+          "Message-ID: <cold@x>",
+          `Date: ${new Date().toUTCString()}`,
+          "",
+          "Buy now",
+          "",
+        ].join("\r\n"),
+      ),
+    );
+    await sync();
+    const message = await row("cold@x");
+
+    const lock = await client.getMailboxLock("INBOX");
+    await client.messageMove(String(message.uid), junk.path, { uid: true });
+    lock.release();
+    await sync();
+
+    const learned = await prisma.groupItem.findMany({
+      where: { group: { rule: { id: coldRule.id } } },
+      select: { value: true },
+    });
+    expect(learned.map((item) => item.value)).toContain("seller@cold.example");
+    await prisma.rule.delete({ where: { id: coldRule.id } });
+  });
+
   test("a deletion in another client removes the row", async () => {
     await deliver("gone@x");
     await sync();

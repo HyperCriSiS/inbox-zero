@@ -9,6 +9,7 @@ import type { Logger } from "@/utils/logger";
 import prisma from "@/utils/prisma";
 import { saveClassificationFeedback } from "@/utils/rule/classification-feedback";
 import { isEligibleForClassificationFeedback } from "@/utils/rule/consts";
+import { learnColdEmailFromSpam } from "@/utils/webhook/google/process-label-added-event";
 
 // Reading a message costs an IMAP fetch, so a bulk reorganisation in another
 // client only teaches from its first moves.
@@ -32,6 +33,7 @@ type MoveFeedback = {
  * updates its own rows when it moves mail. Moving mail into the folder of a
  * rule, or out of it back to the inbox, is the IMAP counterpart of adding or
  * removing a Gmail label, so it is saved as the same classification feedback.
+ * A move into Junk teaches the sender as a cold emailer, as Gmail spam does.
  */
 export async function learnFromImapMoves({
   emailAccountId,
@@ -41,10 +43,12 @@ export async function learnFromImapMoves({
 }: {
   emailAccountId: string;
   moves: ImapMove[];
-  provider: Pick<EmailProvider, "getMessagesBatch">;
+  provider: EmailProvider;
   logger: Logger;
 }) {
   if (!moves.length) return 0;
+
+  await learnFromJunkMoves({ emailAccountId, moves, provider, logger });
 
   const paths = [
     ...new Set(
@@ -151,4 +155,50 @@ async function getRulesByFolder(emailAccountId: string, paths: string[]) {
     }
   }
   return ruleByPath;
+}
+
+async function learnFromJunkMoves({
+  emailAccountId,
+  moves,
+  provider,
+  logger,
+}: {
+  emailAccountId: string;
+  moves: ImapMove[];
+  provider: EmailProvider;
+  logger: Logger;
+}) {
+  const junked = moves
+    .filter((move) => move.toRole === "junk")
+    .slice(0, MAX_MOVES_PER_RUN);
+  if (!junked.length) return;
+
+  const emailAccount = await prisma.emailAccount.findUnique({
+    where: { id: emailAccountId },
+    select: { id: true, email: true },
+  });
+  if (!emailAccount) return;
+
+  const messages = await provider.getMessagesBatch(
+    junked.map((move) => move.messageId),
+  );
+  // Junking a thread moves each of its messages, but the answer is the same.
+  const learnedThreads = new Set<string>();
+  for (const message of messages) {
+    if (learnedThreads.has(message.threadId)) continue;
+    const sender = message.headers.from
+      ? extractEmailAddress(message.headers.from)
+      : "";
+    if (!sender) continue;
+
+    const handled = await learnColdEmailFromSpam({
+      sender,
+      messageId: message.id,
+      threadId: message.threadId,
+      emailAccount,
+      provider,
+      logger,
+    });
+    if (handled) learnedThreads.add(message.threadId);
+  }
 }

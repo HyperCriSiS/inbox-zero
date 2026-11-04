@@ -97,8 +97,9 @@ itself. Calendars shared with you without write access are never booked into.
   book is read again every five minutes at most.
 - Moving mail into a rule's folder in another client, or from it back to the inbox,
   is saved as feedback for that rule, as adding or removing a label is on Gmail.
-  The assistant uses it when it picks rules for that sender. At most 50 moves are
-  read per poll.
+  The assistant uses it when it picks rules for that sender. Moving mail into Junk
+  learns the sender as a cold emailer, as marking spam does on Gmail, unless it is a
+  conversation or a known contact. At most 50 moves are read per poll.
 - Rules for a message are tried on five polls, then it is skipped so one broken
   message cannot block the queue. An outage of the AI provider, such as rate limits,
   overload or a dropped connection, does not count as a try: the poll stops and the
