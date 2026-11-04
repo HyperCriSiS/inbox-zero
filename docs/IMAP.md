@@ -90,7 +90,11 @@ itself. Calendars shared with you without write access are never booked into.
   need a further poll to appear in Sent. New custom folders go under its `Folders`
   root.
 - Rules and sender filters, such as auto-archive, run in the app when new mail is
-  synced. Contact search, signatures and contact photos are not available.
+  synced. Signatures and contact photos are not available.
+- Contact suggestions in the composer, with `NEXT_PUBLIC_CONTACTS_ENABLED=true`, come
+  from the CardDAV address book of a linked CalDAV calendar, which most servers
+  serve with the same login, and from the people you wrote to in Sent. The address
+  book is read again every five minutes at most.
 - Moving mail into a rule's folder in another client, or from it back to the inbox,
   is saved as feedback for that rule, as adding or removing a label is on Gmail.
   The assistant uses it when it picks rules for that sender. At most 50 moves are

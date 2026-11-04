@@ -22,7 +22,11 @@ import type {
   SendEmailOptions,
 } from "@/utils/email/types";
 import type { LocalMailSyncResponse } from "@/utils/email/local-mail-sync-types";
-import type { EmailContact } from "@/utils/email/contact";
+import {
+  type EmailContact,
+  normalizeContactCandidates,
+} from "@/utils/email/contact";
+import { searchImapContacts } from "@/utils/imap/contacts";
 import type { SendAsAddress } from "@/utils/email/send-as";
 import { extractEmailAddress } from "@/utils/email";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
@@ -1280,8 +1284,17 @@ export class ImapProvider implements EmailProvider {
     return [];
   }
 
-  async searchContacts(_query: string): Promise<EmailContact[]> {
-    return [];
+  async searchContacts(query: string): Promise<EmailContact[]> {
+    const sent = await this.findMailbox("sent");
+    return normalizeContactCandidates(
+      await searchImapContacts({
+        emailAccountId: this.account.emailAccountId,
+        query,
+        withClient: (run) => this.withClient(run),
+        sentPath: sent?.path ?? null,
+        logger: this.logger,
+      }),
+    );
   }
 
   async watchEmails() {

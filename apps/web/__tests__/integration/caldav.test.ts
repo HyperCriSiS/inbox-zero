@@ -25,6 +25,7 @@ import {
   updateCalendarEvent,
 } from "@/utils/calendar/event-writer";
 import { getUnifiedCalendarAvailability } from "@/utils/calendar/unified-availability";
+import { searchImapContacts } from "@/utils/imap/contacts";
 import prisma from "@/utils/prisma";
 
 const SERVER_URL = process.env.CALDAV_TEST_URL;
@@ -311,6 +312,52 @@ describe.skipIf(!SERVER_URL || !process.env.RUN_INTEGRATION_TESTS)(
       expect((await provider.findInvitationEvent(invitation))?.response).toBe(
         "accepted",
       );
+    });
+
+    test("contacts come from the CardDAV address book on the same login", async () => {
+      const auth = `Basic ${Buffer.from(`${USERNAME}:${PASSWORD}`).toString("base64")}`;
+      const book = new URL(`/dav/card/${USERNAME}/inbox-zero-test/`, SERVER_URL)
+        .href;
+      // Extended MKCOL creates the address book if this server has none yet.
+      await fetch(book, {
+        method: "MKCOL",
+        headers: { Authorization: auth, "Content-Type": "application/xml" },
+        body: `<?xml version="1.0"?><d:mkcol xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:set><d:prop><d:resourcetype><d:collection/><c:addressbook/></d:resourcetype><d:displayname>Inbox Zero test</d:displayname></d:prop></d:set></d:mkcol>`,
+      });
+      const card = new URL(`zora-${run}.vcf`, book).href;
+      const put = await fetch(card, {
+        method: "PUT",
+        headers: { Authorization: auth, "Content-Type": "text/vcard" },
+        body: [
+          "BEGIN:VCARD",
+          "VERSION:3.0",
+          `UID:zora-${run}`,
+          `FN:Zora ${run}`,
+          `EMAIL:zora-${run}@example.org`,
+          "END:VCARD",
+        ].join("\r\n"),
+      });
+      expect(put.ok).toBe(true);
+
+      try {
+        const contacts = await searchImapContacts({
+          emailAccountId,
+          query: `zora ${run}`,
+          withClient: () => {
+            throw new Error("no IMAP in this test");
+          },
+          sentPath: null,
+          logger,
+        });
+        expect(contacts).toEqual([
+          { emailAddress: `zora-${run}@example.org`, name: `Zora ${run}` },
+        ]);
+      } finally {
+        await fetch(card, {
+          method: "DELETE",
+          headers: { Authorization: auth },
+        });
+      }
     });
   },
 );

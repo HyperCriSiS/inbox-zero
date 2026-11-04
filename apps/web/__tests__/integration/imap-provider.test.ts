@@ -348,6 +348,45 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     }
   }, 60_000);
 
+  // GreenMail has no SPECIAL-USE, so no Sent folder, and no substring search.
+  test.skipIf(PLAIN)(
+    "contact suggestions come from people written to",
+    async () => {
+      const sentPath =
+        (
+          await prisma.imapMailbox.findFirst({
+            where: { connectionId, role: "sent" },
+            select: { path: true },
+          })
+        )?.path ?? "Sent";
+      await client.append(
+        sentPath,
+        Buffer.from(
+          [
+            `From: ${email}`,
+            "To: Bruno Beispiel <bruno@example.net>",
+            "Cc: Carla <carla@example.net>",
+            "Subject: Angebot",
+            "Message-ID: <contacts@x>",
+            `Date: ${new Date().toUTCString()}`,
+            "",
+            "Hallo",
+            "",
+          ].join("\r\n"),
+        ),
+        ["\\Seen"],
+      );
+
+      await expect(provider.searchContacts("bruno")).resolves.toEqual([
+        { emailAddress: "bruno@example.net", name: "Bruno Beispiel" },
+      ]);
+      await expect(provider.searchContacts("carla")).resolves.toEqual([
+        { emailAddress: "carla@example.net", name: "Carla" },
+      ]);
+      await expect(provider.searchContacts("b")).resolves.toEqual([]);
+    },
+  );
+
   test("a deletion in another client removes the row", async () => {
     await deliver("gone@x");
     await sync();
