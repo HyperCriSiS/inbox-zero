@@ -76,8 +76,8 @@ export function CalDavCalendarForm({ disabled }: { disabled?: boolean }) {
             <DialogDescription>
               Works with Nextcloud, iCloud, Fastmail, mailbox.org, Radicale and
               other CalDAV servers. Use an app password where your provider
-              offers one. Calendars are read for meeting context and
-              availability; events are not created here.
+              offers one. Calendars give meeting context and availability,
+              and bookings and invitation answers are written to them.
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={form.handleSubmit(execute)}>

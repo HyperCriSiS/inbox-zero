@@ -15,7 +15,15 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { createTestLogger } from "@/__tests__/helpers";
 import { connectCalDavCalendar } from "@/utils/calendar/caldav-connect";
 import { createCalendarEventProviders } from "@/utils/calendar/event-provider";
-import { createCalDavClient } from "@/utils/calendar/providers/caldav";
+import {
+  type CalDavCalendarProvider,
+  createCalDavClient,
+} from "@/utils/calendar/providers/caldav";
+import {
+  cancelCalendarEvent,
+  createCalendarEvent,
+  updateCalendarEvent,
+} from "@/utils/calendar/event-writer";
 import { getUnifiedCalendarAvailability } from "@/utils/calendar/unified-availability";
 import prisma from "@/utils/prisma";
 
@@ -215,6 +223,94 @@ describe.skipIf(!SERVER_URL || !process.env.RUN_INTEGRATION_TESTS)(
       expect(starts).toContain(at(0).getTime());
       expect(starts).toContain(at(3).getTime());
       expect(starts).not.toContain(at(2, 3).getTime());
+    });
+
+    test("a booking is created, moved and cancelled in the calendar", async () => {
+      const created = await createCalendarEvent({
+        emailAccountId,
+        title: `Booked ${run}`,
+        startTime: at(4, 2),
+        endTime: at(4, 3),
+        timezone: "UTC",
+        attendees: [{ email: "client@example.org", name: "Client" }],
+        locationType: "CUSTOM",
+        locationValue: "https://meet.example.org/room",
+        logger,
+      });
+      expect(created.provider).toBe("caldav");
+      const ref = {
+        providerConnectionId: created.providerConnectionId,
+        providerCalendarId: created.providerCalendarId,
+        providerEventId: created.id,
+        emailAccountId,
+        logger,
+      };
+      const [provider] = await createCalendarEventProviders(
+        emailAccountId,
+        logger,
+      );
+      const booked = () =>
+        provider
+          .fetchEvents({ timeMin: at(3), timeMax: at(6) })
+          .then((events) =>
+            events.filter((event) => event.title === `Booked ${run}`),
+          );
+
+      const [event] = await booked();
+      expect(event.startTime.toISOString()).toBe(at(4, 2).toISOString());
+      expect(event.isOrganizer).toBe(true);
+      expect(event.attendees).toContainEqual(
+        expect.objectContaining({ email: "client@example.org" }),
+      );
+
+      await updateCalendarEvent({
+        ...ref,
+        startTime: at(5, 1),
+        endTime: at(5, 2),
+        timezone: "UTC",
+      });
+      expect((await booked())[0].startTime.toISOString()).toBe(
+        at(5, 1).toISOString(),
+      );
+
+      await cancelCalendarEvent(ref);
+      expect(await booked()).toEqual([]);
+    });
+
+    test("answering an invitation updates the attendee in the calendar", async () => {
+      const uid = `invite-${run}`;
+      await putEvent(uid, [
+        `DTSTART:${stamp(at(6))}`,
+        `DTEND:${stamp(at(6, 1))}`,
+        `SUMMARY:Invite ${run}`,
+        "SEQUENCE:0",
+        "ORGANIZER:mailto:boss@example.com",
+        `ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${email}`,
+      ]);
+      const invitation = {
+        uid,
+        recurrenceId: null,
+        organizer: "boss@example.com",
+        attendee: email,
+        sequence: 0,
+      } as Parameters<CalDavCalendarProvider["findInvitationEvent"]>[0];
+      const [provider] = (await createCalendarEventProviders(
+        emailAccountId,
+        logger,
+      )) as CalDavCalendarProvider[];
+
+      const found = await provider.findInvitationEvent(invitation);
+      expect(found?.response).toBe("needs-action");
+
+      const result = await provider.respondToInvitation(
+        found?.id ?? "",
+        invitation,
+        "accepted",
+      );
+      expect(result.organizerNotified).toBe(false);
+      expect((await provider.findInvitationEvent(invitation))?.response).toBe(
+        "accepted",
+      );
     });
   },
 );

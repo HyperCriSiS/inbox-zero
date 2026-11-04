@@ -1557,6 +1557,8 @@ model Calendar {
   description String?
   primary     Boolean @default(false)
   isEnabled   Boolean @default(true)
+  // CalDAV only: the server grants no write access, so events go elsewhere.
+  isReadOnly  Boolean @default(false)
   timezone    String?
 
   connectionId String

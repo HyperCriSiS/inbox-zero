@@ -124,10 +124,10 @@ describe("createCalendarEvent", () => {
       expect.objectContaining({
         where: {
           isEnabled: true,
+          isReadOnly: false,
           connection: {
             emailAccountId: "email-account-id",
             isConnected: true,
-            provider: { not: "caldav" },
           },
         },
         orderBy: [{ primary: "desc" }, { createdAt: "asc" }],

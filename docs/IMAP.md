@@ -64,9 +64,11 @@ usually enough, for example `https://cloud.example.com/remote.php/dav` for Nextc
 `https://caldav.icloud.com` for iCloud.
 
 CalDAV calendars give meeting context to drafts and the assistant, and their busy
-times count for availability. Recurring events are expanded in the app. Events
-cannot be created in a CalDAV calendar yet, so booking links need a Google or
-Microsoft calendar, and invitations are not answered from the app.
+times count for availability. Recurring events are expanded in the app. Booking
+links create, move and cancel events in a writable CalDAV calendar, but cannot
+generate Google Meet or Teams links. Answering an invitation sets your reply on the
+event and also mails it to the organizer, as not every CalDAV server does that
+itself. Calendars shared with you without write access are never booked into.
 
 ## Behavior
 

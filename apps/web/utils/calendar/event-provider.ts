@@ -12,16 +12,21 @@ import {
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 
+// What createCalendarEventProvider needs from a CalDAV connection.
+export const calDavConnectionSelect = {
+  email: true,
+  caldavUrl: true,
+  caldavUsername: true,
+  caldavPassword: true,
+} satisfies Prisma.CalendarConnectionSelect;
+
 export const calendarConnectionProviderSelect = {
   id: true,
   provider: true,
   accessToken: true,
   refreshToken: true,
   expiresAt: true,
-  email: true,
-  caldavUrl: true,
-  caldavUsername: true,
-  caldavPassword: true,
+  ...calDavConnectionSelect,
 } satisfies Prisma.CalendarConnectionSelect;
 
 export type CalendarConnectionForProvider =
@@ -79,9 +84,7 @@ export function createCalendarEventProvidersFromConnections({
 
     try {
       providers.push(
-        isCalDavProvider(connection.provider)
-          ? createCalDavEventProvider(connection, emailAccountId)
-          : createCalendarEventProvider({ connection, emailAccountId, logger }),
+        createCalendarEventProvider({ connection, emailAccountId, logger }),
       );
     } catch (error) {
       logger.error("Failed to create calendar event provider", {
@@ -124,10 +127,14 @@ export function createCalendarEventProvider({
     id: string;
     provider: string;
     refreshToken: string | null;
-  };
+  } & CalDavConnectionFields;
   emailAccountId: string;
   logger: Logger;
 }) {
+  if (isCalDavProvider(connection.provider)) {
+    return createCalDavEventProvider(connection, emailAccountId);
+  }
+
   const providerParams = {
     accessToken: connection.accessToken,
     connectionId: connection.id,
@@ -164,13 +171,22 @@ function isUsableCalendarConnection(connection: {
   );
 }
 
-// CalDAV calendars are read for context and free/busy only, so they get no
-// writer and stay out of createCalendarEventProvider.
+type CalDavConnectionFields = {
+  email?: string;
+  caldavUrl?: string | null;
+  caldavUsername?: string | null;
+  caldavPassword?: string | null;
+};
+
 function createCalDavEventProvider(
-  connection: CalendarConnectionForProvider,
+  connection: { id: string } & CalDavConnectionFields,
   emailAccountId: string,
 ) {
-  if (!connection.caldavUrl || !connection.caldavPassword) {
+  if (
+    !connection.caldavUrl ||
+    !connection.caldavPassword ||
+    !connection.email
+  ) {
     throw new SafeError("CalDAV connection is missing its server or password");
   }
   return new CalDavCalendarProvider({

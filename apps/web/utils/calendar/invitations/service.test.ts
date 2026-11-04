@@ -104,6 +104,27 @@ describe("responding to calendar invitations", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it("also mails the reply when a CalDAV server does not tell the organizer", async () => {
+    mocks.connections.mockResolvedValue([
+      {
+        provider: "caldav",
+        refreshToken: null,
+        caldavUrl: "https://dav.example.com/",
+        caldavPassword: "secret",
+      },
+    ]);
+    mocks.respond.mockResolvedValue({ organizerNotified: false });
+
+    await expect(respondToCalendarInvitation(params)).resolves.toEqual({
+      response: "accepted",
+      calendarSynced: true,
+    });
+    expect(mocks.respond).toHaveBeenCalledOnce();
+    expect(sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "organizer@example.com" }),
+    );
+  });
+
   it("responds through the calendar event the mailbox linked to the invitation", async () => {
     mocks.connections.mockResolvedValue([
       { provider: "microsoft", refreshToken: "refresh" },

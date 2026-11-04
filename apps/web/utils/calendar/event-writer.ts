@@ -1,4 +1,7 @@
-import { createCalendarEventProvider } from "@/utils/calendar/event-provider";
+import {
+  calDavConnectionSelect,
+  createCalendarEventProvider,
+} from "@/utils/calendar/event-provider";
 import { SafeError } from "@/utils/error";
 import prisma from "@/utils/prisma";
 import type { Logger } from "@/utils/logger";
@@ -154,6 +157,7 @@ async function getWritableProviderForExistingEvent({
     select: {
       id: true,
       provider: true,
+      ...calDavConnectionSelect,
       accessToken: true,
       refreshToken: true,
       expiresAt: true,
@@ -196,11 +200,11 @@ async function getWritableCalendar({
     where: {
       ...where,
       isEnabled: true,
+      // A CalDAV calendar shared without write access cannot take events.
+      isReadOnly: false,
       connection: {
         emailAccountId,
         isConnected: true,
-        // CalDAV calendars are read only here.
-        provider: { not: "caldav" },
       },
     },
     orderBy: [{ primary: "desc" }, { createdAt: "asc" }],
@@ -210,6 +214,7 @@ async function getWritableCalendar({
         select: {
           id: true,
           provider: true,
+          ...calDavConnectionSelect,
           accessToken: true,
           refreshToken: true,
           expiresAt: true,
