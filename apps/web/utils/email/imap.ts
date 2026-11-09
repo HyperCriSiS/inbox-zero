@@ -12,6 +12,7 @@ import type {
   EmailFilter,
   EmailFolderCount,
   EmailLabel,
+  EmailLabelColor,
   EmailLabelUpdate,
   EmailProvider,
   EmailSignature,
@@ -21,6 +22,8 @@ import type {
   ProviderMailboxSearch,
   SendEmailOptions,
 } from "@/utils/email/types";
+
+import { getGmailDefaultLabelColor, type LabelColorName } from "@/utils/label";
 import type { LocalMailSyncResponse } from "@/utils/email/local-mail-sync-types";
 import {
   type EmailContact,
@@ -635,9 +638,15 @@ export class ImapProvider implements EmailProvider {
     ownerEmail: string,
     emailAccountId: string,
   ) {
+    let archived = 0;
     for (const email of fromEmails) {
-      await this.bulkArchiveSenderOrThrow(email, ownerEmail, emailAccountId);
+      archived += await this.bulkArchiveSenderOrThrow(
+        email,
+        ownerEmail,
+        emailAccountId,
+      );
     }
+    return archived;
   }
 
   async bulkArchiveSenderOrThrow(
@@ -1270,6 +1279,11 @@ export class ImapProvider implements EmailProvider {
 
   async getSignatures(): Promise<EmailSignature[]> {
     return [];
+  }
+
+  // IMAP keeps no label colors, so the app shows the same palette as Gmail.
+  getDefaultLabelColor(colorName: LabelColorName): EmailLabelColor {
+    return getGmailDefaultLabelColor(colorName);
   }
 
   async getContactPhotos(): Promise<Record<string, string>> {

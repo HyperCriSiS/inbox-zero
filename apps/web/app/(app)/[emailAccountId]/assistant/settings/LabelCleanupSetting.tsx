@@ -147,7 +147,7 @@ function Content() {
       <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
         <LabelCombobox
           value={{ id: labelId, name: selected?.name ?? null }}
-          onChangeValue={setLabelId}
+          onChangeValue={(label) => setLabelId(label.id)}
           userLabels={labels.userLabels}
           isLoading={labels.isLoading}
           mutate={labels.mutate}
