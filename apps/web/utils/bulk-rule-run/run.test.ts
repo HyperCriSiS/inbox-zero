@@ -27,14 +27,19 @@ const baseRun = {
   includeRead: false,
   rerun: false,
   skipDraftReplies: true,
-  pageToken: null,
+  cursorBefore: null,
 };
-
-function thread(id: string) {
-  return { id, messages: [{ id: `${id}-m`, threadId: id }] };
+const day = (n: number) =>
+  String(new Date(`2026-03-${String(n).padStart(2, "0")}T10:00:00Z`).getTime());
+function thread(id: string, date: string) {
+  return {
+    id,
+    messages: [{ id: `${id}-m`, threadId: id, internalDate: date }],
+  };
 }
 
 let provider: EmailProvider;
+let owner: string | undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -46,35 +51,57 @@ beforeEach(() => {
   } as never);
   prisma.rule.findMany.mockResolvedValue([]);
   prisma.executedRule.findFirst.mockResolvedValue(null);
-  prisma.bulkRuleRun.update.mockResolvedValue({ status: "RUNNING" } as never);
+  prisma.bulkRuleRun.findUniqueOrThrow.mockResolvedValue(baseRun as never);
+  // Capture the lease owner the slice claims with.
+  prisma.bulkRuleRun.updateMany.mockImplementation((async (args: {
+    data: { leaseOwner?: string };
+  }) => {
+    if (args.data.leaseOwner) owner = args.data.leaseOwner;
+    return { count: 1 };
+  }) as never);
+  prisma.bulkRuleRun.update.mockImplementation((async () => ({
+    status: "RUNNING",
+    leaseOwner: owner,
+  })) as never);
+  prisma.bulkRuleRun.findUnique.mockResolvedValue({
+    status: "RUNNING",
+  } as never);
 });
 
+function pages(...threadPages: ReturnType<typeof thread>[][]) {
+  const mock = vi.mocked(provider.getThreadsWithQuery);
+  for (const threads of threadPages) {
+    mock.mockResolvedValueOnce({ threads } as never);
+  }
+  mock.mockResolvedValue({ threads: [] } as never);
+}
+
 describe("processBulkRuleRunSlice", () => {
-  it("runs rules on new threads, skips done ones and completes", async () => {
-    prisma.bulkRuleRun.findUnique.mockResolvedValue(baseRun as never);
+  it("does nothing while another slice holds the lease", async () => {
+    prisma.bulkRuleRun.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      processBulkRuleRunSlice({ runId: "run-1", logger }),
+    ).resolves.toBe("idle");
+    expect(createEmailProvider).not.toHaveBeenCalled();
+  });
+
+  it("walks back by date, skips done threads and completes", async () => {
+    pages([thread("a", day(5)), thread("b", day(4))], [thread("c", day(2))]);
     prisma.executedRule.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: "done" } as never);
-    vi.mocked(provider.getThreadsWithQuery).mockResolvedValue({
-      threads: [thread("a"), thread("b")] as never,
-    });
 
     await expect(
       processBulkRuleRunSlice({ runId: "run-1", logger }),
     ).resolves.toBe("completed");
 
-    expect(runRules).toHaveBeenCalledTimes(1);
-    expect(
-      vi.mocked(provider.getThreadsWithQuery).mock.calls[0][0],
-    ).toMatchObject({ query: { type: "inbox", isUnread: true } });
-    expect(prisma.bulkRuleRun.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          processed: { increment: 1 },
-          skipped: { increment: 1 },
-        }),
-      }),
-    );
+    const calls = vi.mocked(provider.getThreadsWithQuery).mock.calls;
+    expect(calls[0][0].query).toMatchObject({ type: "inbox", isUnread: true });
+    expect(calls[0][0].query).not.toHaveProperty("before");
+    // The next page starts below the oldest thread seen, not at an offset.
+    expect(calls[1][0].query?.before).toEqual(new Date(Number(day(4))));
+    expect(runRules).toHaveBeenCalledTimes(2);
     expect(prisma.bulkRuleRun.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "COMPLETED" }),
@@ -83,17 +110,13 @@ describe("processBulkRuleRunSlice", () => {
   });
 
   it("counts a failing message and keeps going", async () => {
-    prisma.bulkRuleRun.findUnique.mockResolvedValue(baseRun as never);
+    pages([thread("a", day(5)), thread("b", day(4))]);
     vi.mocked(runRules)
       .mockRejectedValueOnce(new Error("AI down"))
       .mockResolvedValueOnce([]);
-    vi.mocked(provider.getThreadsWithQuery).mockResolvedValue({
-      threads: [thread("a"), thread("b")] as never,
-    });
 
     await processBulkRuleRunSlice({ runId: "run-1", logger });
 
-    expect(runRules).toHaveBeenCalledTimes(2);
     expect(prisma.bulkRuleRun.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -104,13 +127,15 @@ describe("processBulkRuleRunSlice", () => {
     );
   });
 
-  it("stops after the page when the run was paused meanwhile", async () => {
-    prisma.bulkRuleRun.findUnique.mockResolvedValue(baseRun as never);
-    prisma.bulkRuleRun.update.mockResolvedValue({ status: "PAUSED" } as never);
-    vi.mocked(provider.getThreadsWithQuery).mockResolvedValue({
-      threads: [thread("a")] as never,
-      nextPageToken: "next",
-    });
+  it("stops after the page when paused and queues nothing", async () => {
+    pages([thread("a", day(5))], [thread("b", day(4))]);
+    prisma.bulkRuleRun.update.mockResolvedValueOnce({
+      status: "PAUSED",
+      leaseOwner: "x",
+    } as never);
+    prisma.bulkRuleRun.findUnique.mockResolvedValue({
+      status: "PAUSED",
+    } as never);
 
     await expect(
       processBulkRuleRunSlice({ runId: "run-1", logger }),
@@ -119,35 +144,53 @@ describe("processBulkRuleRunSlice", () => {
     expect(enqueueBackgroundJob).not.toHaveBeenCalled();
   });
 
-  it("does nothing for a run that is not running", async () => {
-    prisma.bulkRuleRun.findUnique.mockResolvedValue({
-      ...baseRun,
-      status: "CANCELLED",
+  it("queues the next slice when resumed while it was stopping", async () => {
+    pages([thread("a", day(5))], [thread("b", day(4))]);
+    prisma.bulkRuleRun.update.mockResolvedValueOnce({
+      status: "PAUSED",
+      leaseOwner: "x",
     } as never);
+    // The resume landed between the page and the lease release.
+    prisma.bulkRuleRun.findUnique.mockResolvedValue({
+      status: "RUNNING",
+    } as never);
+
+    await processBulkRuleRunSlice({ runId: "run-1", logger });
+
+    expect(enqueueBackgroundJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the run failed when the mailbox cannot be read", async () => {
+    vi.mocked(provider.getThreadsWithQuery).mockRejectedValue(
+      new Error("IMAP down"),
+    );
 
     await expect(
       processBulkRuleRunSlice({ runId: "run-1", logger }),
-    ).resolves.toBe("idle");
-    expect(createEmailProvider).not.toHaveBeenCalled();
+    ).resolves.toBe("failed");
+    expect(prisma.bulkRuleRun.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED", leaseOwner: null }),
+      }),
+    );
   });
 
-  it("resumes from the saved page token and reruns when asked", async () => {
-    prisma.bulkRuleRun.findUnique.mockResolvedValue({
+  it("resumes below the saved cursor and reruns when asked", async () => {
+    prisma.bulkRuleRun.findUniqueOrThrow.mockResolvedValue({
       ...baseRun,
-      pageToken: "saved",
+      cursorBefore: new Date(Number(day(9))),
       rerun: true,
       includeRead: true,
     } as never);
     prisma.executedRule.findFirst.mockResolvedValue({ id: "done" } as never);
-    vi.mocked(provider.getThreadsWithQuery).mockResolvedValue({
-      threads: [thread("a")] as never,
-    });
+    pages([thread("a", day(8))]);
 
     await processBulkRuleRunSlice({ runId: "run-1", logger });
 
-    const call = vi.mocked(provider.getThreadsWithQuery).mock.calls[0][0];
-    expect(call.pageToken).toBe("saved");
-    expect(call.query).not.toHaveProperty("isUnread");
+    const query = vi.mocked(provider.getThreadsWithQuery).mock.calls[0][0]
+      .query;
+    expect(query?.before).toEqual(new Date(Number(day(9))));
+    expect(query).not.toHaveProperty("isUnread");
     expect(runRules).toHaveBeenCalledTimes(1);
   });
 });

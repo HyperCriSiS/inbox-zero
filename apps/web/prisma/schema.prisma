@@ -3104,7 +3104,10 @@ model BulkRuleRun {
   includeRead      Boolean           @default(false)
   rerun            Boolean           @default(false)
   skipDraftReplies Boolean           @default(true)
-  pageToken        String?
+  // Threads older than this are still to do, so archived mail cannot shift pages.
+  cursorBefore     DateTime?
+  leaseOwner       String?
+  leaseUntil       DateTime?
   processed        Int               @default(0)
   skipped          Int               @default(0)
   failed           Int               @default(0)
