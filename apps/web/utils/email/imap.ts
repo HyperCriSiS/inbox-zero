@@ -1172,7 +1172,10 @@ export class ImapProvider implements EmailProvider {
       raw,
     );
     await this.storeSentCopy(raw, messageId);
-    await this.deleteDraft(draftId);
+    // The mail is out. Failing now would invite sending it a second time.
+    await this.deleteDraft(draftId).catch((error) =>
+      this.logger.error("Could not remove a sent IMAP draft", { error }),
+    );
     return { messageId, threadId: row.threadId };
   }
 
@@ -2093,14 +2096,20 @@ export class ImapProvider implements EmailProvider {
     const mailbox = await this.findMailbox("sent");
     if (!mailbox) return;
 
-    await this.withClient(async (client) => {
-      const existing = await searchUids(client, mailbox.path, {
-        header: { "message-id": messageId },
+    // The mail is already delivered when this runs. A failure here must not
+    // make the send look failed, or the user sends it again.
+    try {
+      await this.withClient(async (client) => {
+        const existing = await searchUids(client, mailbox.path, {
+          header: { "message-id": messageId },
+        });
+        if (existing.length) return;
+        const stored = await client.append(mailbox.path, raw, ["\\Seen"]);
+        if (!stored) throw new Error("IMAP append failed");
       });
-      if (!existing.length) {
-        await client.append(mailbox.path, raw, ["\\Seen"]);
-      }
-    });
+    } catch (error) {
+      this.logger.error("Could not file the sent copy", { error });
+    }
   }
 
   private async storeDraft(options: Mail.Options, threadId?: string) {
@@ -2519,12 +2528,17 @@ export function parseImapQuery(query: string | undefined): SearchObject {
     const key = match?.[1].toLowerCase();
     const value = match?.[2].replace(/^"|"$/g, "") ?? "";
 
+    const date = new Date(value);
+    const isDate = !Number.isNaN(date.getTime());
+
     if (key === "from") criteria.from = value;
     else if (key === "to") criteria.to = value;
     else if (key === "subject") criteria.subject = value;
-    else if (key === "before") criteria.before = new Date(value);
-    else if (key === "after" || key === "since")
-      criteria.since = new Date(value);
+    // An unreadable date stays a search term. Dropping it would widen the
+    // search to mail the query meant to leave out.
+    else if (key === "before" && isDate) criteria.before = date;
+    else if ((key === "after" || key === "since") && isDate)
+      criteria.since = date;
     else if (token === "is:unread") criteria.seen = false;
     else if (token === "is:read") criteria.seen = true;
     else if (token === "is:starred") criteria.flagged = true;
