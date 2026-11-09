@@ -184,6 +184,31 @@ describe("withReviewBeforeDelete", () => {
       );
     });
 
+    it("moves every message of a sender when pages are offsets", async () => {
+      let inbox = Array.from({ length: 250 }, (_, index) => `m${index}`);
+      const provider = createMockEmailProvider({
+        name: "imap",
+        getOrCreateFolderIdByName: vi.fn().mockResolvedValue("Review"),
+        moveThreadFromFolderToInbox: vi.fn(),
+        getMessagesFromSender: vi.fn(async ({ maxResults, pageToken }) => {
+          const offset = Number(pageToken ?? 0);
+          const end = offset + (maxResults ?? 20);
+          return {
+            messages: inbox.slice(offset, end).map((id) => ({ id })),
+            nextPageToken: end < inbox.length ? String(end) : undefined,
+          };
+        }) as never,
+        moveMessagesToFolder: vi.fn(async (messageIds: string[]) => {
+          inbox = inbox.filter((id) => !messageIds.includes(id));
+        }),
+      });
+      const reviewed = withReviewBeforeDelete(provider, "Review", logger);
+
+      await reviewed.bulkTrashFromSenders(["news@example.com"], "me", "a");
+
+      expect(inbox).toEqual([]);
+    });
+
     it("moves to the review folder and restores only from it", async () => {
       const provider = createMockEmailProvider({
         name: "imap",
