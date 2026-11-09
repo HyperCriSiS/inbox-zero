@@ -1,7 +1,7 @@
 import ICAL from "ical.js";
 import type { ImapFlow } from "imapflow";
 import { createDAVClient } from "tsdav";
-import { calDavFetch } from "@/utils/calendar/providers/caldav";
+import { createCalDavFetch } from "@/utils/calendar/providers/caldav";
 import type { EmailContact } from "@/utils/email/contact";
 import type { Logger } from "@/utils/logger";
 import prisma from "@/utils/prisma";
@@ -92,7 +92,7 @@ async function loadCardDavContacts(emailAccountId: string) {
       },
       authMethod: "Basic",
       defaultAccountType: "carddav",
-      fetch: calDavFetch,
+      fetch: createCalDavFetch(connection.caldavUrl),
     });
 
     for (const addressBook of await client.fetchAddressBooks()) {

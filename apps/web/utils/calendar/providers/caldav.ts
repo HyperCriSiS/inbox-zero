@@ -12,6 +12,7 @@ import {
   type RequestInit as UndiciRequestInit,
 } from "undici";
 import { isSafeExternalHttpUrl } from "@inboxzero/network/safe-url";
+import { getDomain } from "tldts";
 import { env } from "@/env";
 import type { BusyPeriod } from "@/utils/calendar/availability-types";
 import type {
@@ -90,39 +91,70 @@ export function getCalDavUrlError(url: string): string | null {
  * SSRF guard. Redirects are followed by hand so each target is checked too,
  * unless the caller asked to see them, as service discovery does for
  * /.well-known/caldav. Its next request comes through here again.
+ *
+ * The login only goes to the site of the configured server, so a redirect to
+ * another domain cannot collect it. Subdomains count as the same site, as
+ * iCloud spreads accounts over pNN-caldav.icloud.com.
  */
-export const calDavFetch: typeof fetch = async (input, init) => {
-  let target =
-    typeof input === "string"
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input.url;
+export function createCalDavFetch(serverUrl: string): typeof fetch {
+  const site = siteOf(serverUrl);
 
-  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
-    const urlError = getCalDavUrlError(target);
-    if (urlError) throw new SafeError(`Calendar server refused: ${urlError}`);
+  return async (input, init) => {
+    let target =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    let request: RequestInit = init ?? {};
 
-    const response = await undiciFetch(target, {
-      ...(init as UndiciRequestInit),
-      redirect: "manual",
-      signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      ...(env.IMAP_ALLOW_PRIVATE_HOSTS ? {} : { dispatcher: publicOnlyAgent }),
-    });
+    for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+      const urlError = getCalDavUrlError(target);
+      if (urlError) throw new SafeError(`Calendar server refused: ${urlError}`);
 
-    if (
-      !REDIRECT_STATUSES.has(response.status) ||
-      init?.redirect === "manual"
-    ) {
-      return response as unknown as Response;
+      const response = await undiciFetch(target, {
+        ...(withoutForeignLogin(request, target, site) as UndiciRequestInit),
+        redirect: "manual",
+        signal: request.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ...(env.IMAP_ALLOW_PRIVATE_HOSTS
+          ? {}
+          : { dispatcher: publicOnlyAgent }),
+      });
+
+      if (
+        !REDIRECT_STATUSES.has(response.status) ||
+        init?.redirect === "manual"
+      ) {
+        return response as unknown as Response;
+      }
+      const location = response.headers.get("location");
+      if (!location) return response as unknown as Response;
+      target = new URL(location, target).href;
+      if (response.status === 303) {
+        request = { ...request, method: "GET", body: undefined };
+      }
     }
-    const location = response.headers.get("location");
-    if (!location) return response as unknown as Response;
-    target = new URL(location, target).href;
-  }
 
-  throw new SafeError("The calendar server redirected too many times");
-};
+    throw new SafeError("The calendar server redirected too many times");
+  };
+}
+
+function siteOf(url: string) {
+  const { hostname } = new URL(url);
+  return getDomain(hostname) ?? hostname;
+}
+
+function withoutForeignLogin(
+  request: RequestInit,
+  target: string,
+  site: string,
+): RequestInit {
+  if (siteOf(target) === site) return request;
+  const headers = new Headers(request.headers);
+  headers.delete("authorization");
+  headers.delete("cookie");
+  return { ...request, headers };
+}
 
 export function createCalDavClient(credentials: CalDavCredentials) {
   return createDAVClient({
@@ -133,7 +165,7 @@ export function createCalDavClient(credentials: CalDavCredentials) {
     },
     authMethod: "Basic",
     defaultAccountType: "caldav",
-    fetch: calDavFetch,
+    fetch: createCalDavFetch(credentials.serverUrl),
   });
 }
 
