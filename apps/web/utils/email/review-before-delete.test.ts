@@ -137,6 +137,53 @@ describe("withReviewBeforeDelete", () => {
   });
 
   describe("folder providers", () => {
+    it("sends moves into the trash or junk folder to review", async () => {
+      const provider = createMockEmailProvider({
+        name: "imap",
+        getOrCreateFolderIdByName: vi.fn().mockResolvedValue("Review"),
+        moveMessagesToFolder: vi.fn(),
+        moveThreadFromFolderToInbox: vi.fn(),
+        getFolders: vi.fn().mockResolvedValue([
+          {
+            id: "Trash",
+            displayName: "Trash",
+            systemType: "TRASH",
+            childFolders: [],
+          },
+          {
+            id: "INBOX",
+            displayName: "INBOX",
+            systemType: "INBOX",
+            childFolders: [
+              {
+                id: "INBOX.Junk",
+                displayName: "Junk",
+                systemType: "SPAM",
+                childFolders: [],
+              },
+            ],
+          },
+          { id: "Projects", displayName: "Projects", childFolders: [] },
+        ]),
+      });
+      const reviewed = withReviewBeforeDelete(provider, "Review", logger);
+
+      await reviewed.moveThreadToFolder("t1", "me@example.com", "trash");
+      await reviewed.moveThreadToFolder("t2", "me@example.com", "INBOX.Junk");
+      await reviewed.moveThreadToFolder("t3", "me@example.com", "Projects");
+      await reviewed.moveMessagesToFolder?.(["m1"], "Junk");
+
+      expect(vi.mocked(provider.moveThreadToFolder).mock.calls).toEqual([
+        ["t1", "me@example.com", "Review"],
+        ["t2", "me@example.com", "Review"],
+        ["t3", "me@example.com", "Projects"],
+      ]);
+      expect(provider.moveMessagesToFolder).toHaveBeenCalledWith(
+        ["m1"],
+        "Review",
+      );
+    });
+
     it("moves to the review folder and restores only from it", async () => {
       const provider = createMockEmailProvider({
         name: "imap",
