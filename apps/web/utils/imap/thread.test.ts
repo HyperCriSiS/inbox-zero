@@ -61,7 +61,7 @@ describe("resolveThread", () => {
     expect(result).toEqual({ threadId: "thread-1", mergeThreadIds: [] });
   });
 
-  it("reports threads to merge when a message connects two of them", () => {
+  it("joins its nearest ancestor without merging two conversations", () => {
     const known = new Map([
       ["a@x", "thread-1"],
       ["b@x", "thread-2"],
@@ -71,6 +71,15 @@ describe("resolveThread", () => {
       { messageId: "<c@x>", references: "<a@x> <b@x>" },
       known,
     );
+
+    expect(result).toEqual({ threadId: "thread-2", mergeThreadIds: [] });
+  });
+
+  it("merges the threads of replies that waited for this message", () => {
+    const result = resolve({ messageId: "<root@x>" }, NO_THREADS, [
+      "thread-1",
+      "thread-2",
+    ]);
 
     expect(result).toEqual({
       threadId: "thread-1",
@@ -132,9 +141,24 @@ describe("assignThreads", () => {
     expect(threadIds).toEqual(["thread-1"]);
   });
 
-  it("merges two threads and rewrites earlier batch results", () => {
+  it("keeps two conversations apart when one message names both", () => {
     const { threadIds, merges } = assignThreads(
       [input("<a@x>"), input("<b@x>"), input("<c@x>", "<a@x> <b@x>")],
+      [],
+    );
+
+    expect(threadIds[0]).not.toBe(threadIds[1]);
+    expect(threadIds[2]).toBe(threadIds[1]);
+    expect(merges.size).toBe(0);
+  });
+
+  it("merges replies that were split before their parent arrived", () => {
+    const { threadIds, merges } = assignThreads(
+      [
+        input("<root@x>"),
+        input("<late@x>", "<reply@x>"),
+        input("<reply@x>", "<root@x>"),
+      ],
       [],
     );
 

@@ -4,6 +4,7 @@ import {
   diffMailbox,
   getScanStartUid,
   type IndexedMessage,
+  isSecondCopyOfOwnMail,
   isSyncableFolder,
   matchMovedMessages,
   planMailboxSync,
@@ -214,7 +215,7 @@ describe("shouldEnqueueForRules", () => {
         shouldEnqueueForRules({
           mode: "incremental",
           role,
-          alreadyIndexedElsewhere: false,
+          isSecondCopyOfOwnMail: false,
         }),
       ).toBe(true);
     }
@@ -228,8 +229,22 @@ describe("shouldEnqueueForRules", () => {
     ["incremental", "inbox", true],
   ] as const)("skips mode=%s role=%s copy=%s", (mode, role, copy) => {
     expect(
-      shouldEnqueueForRules({ mode, role, alreadyIndexedElsewhere: copy }),
+      shouldEnqueueForRules({ mode, role, isSecondCopyOfOwnMail: copy }),
     ).toBe(false);
+  });
+});
+
+describe("isSecondCopyOfOwnMail", () => {
+  it("recognizes mail to oneself in Sent and the inbox", () => {
+    expect(isSecondCopyOfOwnMail("inbox", ["sent"])).toBe(true);
+    expect(isSecondCopyOfOwnMail("sent", ["inbox"])).toBe(true);
+  });
+
+  it("does not trust a Message-ID that is only known from received mail", () => {
+    expect(isSecondCopyOfOwnMail("inbox", ["inbox", "archive", null])).toBe(
+      false,
+    );
+    expect(isSecondCopyOfOwnMail("inbox", ["trash", "junk"])).toBe(false);
   });
 });
 

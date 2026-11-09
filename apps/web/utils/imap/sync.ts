@@ -23,6 +23,7 @@ import {
   diffMailbox,
   getScanStartUid,
   type IndexedMessage,
+  isSecondCopyOfOwnMail,
   isSyncableFolder,
   matchMovedMessages,
   type MailboxSyncMode,
@@ -386,9 +387,12 @@ async function commitScans({
     })),
     deleted.map((row) => row.id),
   );
-  const indexedElsewhere = new Set(
-    existing.flatMap((row) => row.rfc822MessageId ?? []),
-  );
+  const rolesOfIndexedCopies = new Map<string, (string | null)[]>();
+  for (const { rfc822MessageId, mailbox } of existing) {
+    if (!rfc822MessageId) continue;
+    const roles = rolesOfIndexedCopies.get(rfc822MessageId) ?? [];
+    rolesOfIndexedCopies.set(rfc822MessageId, [...roles, mailbox.role]);
+  }
   // The client groups by thread, so absorbed messages must be reported again.
   const mergedMessages = merges.size
     ? await prisma.imapMessage.findMany({
@@ -422,9 +426,10 @@ async function commitScans({
       shouldEnqueueForRules({
         mode: scan.mode,
         role: scan.role,
-        alreadyIndexedElsewhere:
-          !!message.rfc822MessageId &&
-          indexedElsewhere.has(message.rfc822MessageId),
+        isSecondCopyOfOwnMail: isSecondCopyOfOwnMail(
+          scan.role,
+          rolesOfIndexedCopies.get(message.rfc822MessageId ?? "") ?? [],
+        ),
       }),
     )
     .map(({ row }) => ({ connectionId, messageId: row.id }));

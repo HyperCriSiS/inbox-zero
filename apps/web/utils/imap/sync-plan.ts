@@ -168,22 +168,36 @@ export function diffFlags(
 
 /**
  * Only fresh arrivals run rules. Baselines and resets replay existing mail, and
- * a copy of an indexed message has already been handled.
+ * mail to oneself was handled when its first copy arrived.
  */
 export function shouldEnqueueForRules({
   mode,
   role,
-  alreadyIndexedElsewhere,
+  isSecondCopyOfOwnMail,
 }: {
   mode: Exclude<MailboxSyncMode, "idle">;
   role: ImapMailboxRole | null;
-  alreadyIndexedElsewhere: boolean;
+  isSecondCopyOfOwnMail: boolean;
 }) {
   return (
     mode === "incremental" &&
     INTAKE_ROLES.includes(role) &&
-    !alreadyIndexedElsewhere
+    !isSecondCopyOfOwnMail
   );
+}
+
+/**
+ * Mail to oneself shows up in Sent and in the inbox under one Message-ID. A
+ * known Message-ID anywhere else proves nothing, because senders choose it,
+ * and skipping on it would let a reused ID slip past every rule.
+ */
+export function isSecondCopyOfOwnMail(
+  role: ImapMailboxRole | null,
+  rolesOfIndexedCopies: readonly (string | null)[],
+) {
+  if (role === "inbox") return rolesOfIndexedCopies.includes("sent");
+  if (role === "sent") return rolesOfIndexedCopies.includes("inbox");
+  return false;
 }
 
 function findVanishedIndex(
