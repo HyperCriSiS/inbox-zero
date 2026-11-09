@@ -12,12 +12,26 @@ import {
 } from "@/utils/imap/connection";
 import { verifySmtp } from "@/utils/imap/smtp";
 import { syncImapAccount } from "@/utils/imap/sync";
+import { checkRateLimit, createRateLimitKey } from "@/utils/rate-limit";
 import prisma from "@/utils/prisma";
 
 export const linkImapAccountAction = actionClientUser
   .metadata({ name: "linkImapAccount" })
   .inputSchema(linkImapAccountBody)
   .action(async ({ ctx: { userId, logger }, parsedInput: input }) => {
+    // Every attempt makes this server log in somewhere on the user's behalf.
+    const { limited } = await checkRateLimit({
+      rule: {
+        key: createRateLimitKey(["rate-limit", "imap-link", userId]),
+        limit: 10,
+        windowSeconds: 10 * 60,
+      },
+      logger,
+    });
+    if (limited) {
+      throw new SafeError("Too many attempts. Try again in a few minutes.");
+    }
+
     const existing = await prisma.emailAccount.findUnique({
       where: { email: input.email },
       select: {

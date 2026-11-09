@@ -1,4 +1,9 @@
-import type { ConnectionOptions } from "node:tls";
+import { X509Certificate } from "node:crypto";
+import {
+  type ConnectionOptions,
+  checkServerIdentity,
+  type PeerCertificate,
+} from "node:tls";
 import { ImapFlow, type ImapFlowOptions } from "imapflow";
 import {
   isBlockedIpAddress,
@@ -80,14 +85,27 @@ export function buildTlsOptions(
 
   // Node skips checkServerIdentity when chain validation fails, so a fingerprint
   // check there would never run for a self-signed certificate. The pinned
-  // certificate is the only trust anchor instead, and it replaces the hostname
-  // check because local bridges issue certificates without a matching name.
+  // certificate is the only trust anchor instead. Local bridges issue
+  // certificates without a matching name, so the pinned certificate itself
+  // passes without the hostname check. Anything else it signed still needs a
+  // matching name, or pinning a CA would accept every certificate of that CA.
   return {
     servername,
     rejectUnauthorized: true,
     ca: tlsPinnedCertPem,
-    checkServerIdentity: () => undefined,
+    checkServerIdentity: (host, certificate) =>
+      isPinnedCertificate(certificate, tlsPinnedCertPem)
+        ? undefined
+        : checkServerIdentity(host, certificate),
   };
+}
+
+function isPinnedCertificate(certificate: PeerCertificate, pinnedPem: string) {
+  try {
+    return new X509Certificate(pinnedPem).raw.equals(certificate.raw);
+  } catch {
+    return false;
+  }
 }
 
 export function buildImapOptions(
