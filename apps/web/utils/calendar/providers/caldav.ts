@@ -616,8 +616,31 @@ export function parseCalDavEvents({
   end: Date;
 }): ParsedCalDavEvent[] {
   const calendar = parseCalendarObject(object);
-  registerTimezones(calendar);
+  const registered = registerTimezones(calendar);
+  try {
+    return expandCalendar({ calendar, object, email, timezone, start, end });
+  } finally {
+    // The registry is shared by the whole process. A definition left in it
+    // would decide the times of other users' events that name the same zone.
+    for (const tzid of registered) ICAL.TimezoneService.remove(tzid);
+  }
+}
 
+function expandCalendar({
+  calendar,
+  object,
+  email,
+  timezone,
+  start,
+  end,
+}: {
+  calendar: ICAL.Component;
+  object: Pick<DAVCalendarObject, "url">;
+  email: string;
+  timezone: string;
+  start: Date;
+  end: Date;
+}): ParsedCalDavEvent[] {
   const self = email.toLowerCase();
   const output: ParsedCalDavEvent[] = [];
   const components = calendar.getAllSubcomponents("vevent");
@@ -700,21 +723,14 @@ export function parseCalDavEvents({
       continue;
     }
 
+    // One runaway series stops at the cap. Failing here would hide every
+    // other event of the calendar, and availability would read as free.
     const iterator = event.iterator();
-    let exhausted = false;
     for (let count = 0; count < MAX_OCCURRENCES; count++) {
       const next = iterator.next();
-      if (!next || toDate(next, timezone) >= end) {
-        exhausted = true;
-        break;
-      }
+      if (!next || toDate(next, timezone) >= end) break;
       const occurrence = event.getOccurrenceDetails(next);
       add(occurrence.item, occurrence.startDate, occurrence.endDate, next);
-    }
-    if (!exhausted) {
-      throw new SafeError(
-        "A recurring calendar event repeats more often than supported",
-      );
     }
   }
 
@@ -730,12 +746,15 @@ function parseCalendarObject(object: Pick<DAVCalendarObject, "data">) {
 // Times with a TZID resolve only against registered zones. Servers usually
 // ship the VTIMEZONE in the same object.
 function registerTimezones(calendar: ICAL.Component) {
+  const registered: string[] = [];
   for (const zone of calendar.getAllSubcomponents("vtimezone")) {
     const tzid = zone.getFirstPropertyValue("tzid");
     if (typeof tzid === "string" && !ICAL.TimezoneService.has(tzid)) {
       ICAL.TimezoneService.register(new ICAL.Timezone(zone));
+      registered.push(tzid);
     }
   }
+  return registered;
 }
 
 function toDate(time: ICAL.Time, fallbackTimezone: string) {
