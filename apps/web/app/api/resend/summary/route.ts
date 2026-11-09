@@ -23,6 +23,7 @@ import { sendSummaryEmailBody } from "./validation";
 import { createEmailProvider } from "@/utils/email/provider";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 import type { ParsedMessage } from "@/utils/types";
@@ -198,7 +199,9 @@ async function sendEmail({
   const messages = await getMessages({
     emailAccountId,
     provider: emailAccount.account.provider,
-    hasRefreshToken: !!emailAccount.account.refresh_token,
+    hasRefreshToken:
+      !!emailAccount.account.refresh_token ||
+      isImapProvider(emailAccount.account.provider),
     messageIds,
     logger,
   });
@@ -309,7 +312,11 @@ async function getMessages({
     return [];
   }
 
-  if (!isGoogleProvider(provider) && !isMicrosoftProvider(provider)) {
+  if (
+    !isGoogleProvider(provider) &&
+    !isMicrosoftProvider(provider) &&
+    !isImapProvider(provider)
+  ) {
     logger.warn("Skipping summary message fetch: unsupported provider", {
       provider,
     });

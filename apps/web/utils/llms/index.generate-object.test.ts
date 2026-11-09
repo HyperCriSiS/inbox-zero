@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const {
   mockAssertTrialAiUsageAllowed,
@@ -20,6 +21,15 @@ const {
 
 vi.mock("ai", () => ({
   APICallError: { isInstance: () => false },
+  asSchema: (schema: any) => ({
+    jsonSchema: { type: "object" },
+    validate: (value: unknown) => {
+      const parsed = schema.safeParse(value);
+      return parsed.success
+        ? { success: true, value: parsed.data }
+        : { success: false, error: parsed.error };
+    },
+  }),
   RetryError: { isInstance: () => false },
   NoObjectGeneratedError: { isInstance: mockNoObjectGeneratedErrorIsInstance },
   TypeValidationError: { isInstance: () => false },
@@ -447,6 +457,33 @@ describe("createGenerateObject repairText", () => {
         trace_name: expect.any(String),
       });
     });
+  });
+
+  it("moves the schema to the prompt when the provider rejects it as too complex", async () => {
+    mockGenerateObject
+      .mockRejectedValueOnce(
+        new Error(
+          "Schemas contains too many optional parameters (87), which would make grammar compilation inefficient.",
+        ),
+      )
+      .mockResolvedValueOnce({ object: { name: "Ada" }, usage: null });
+    const generateObject = await createTestGenerateObject({
+      provider: "anthropic",
+      modelName: "claude-test",
+    });
+
+    const result = await generateObject({
+      instructions: "Return JSON.",
+      prompt: "Who is this?",
+      schema: z.object({ name: z.string(), role: z.string().default("none") }),
+    } as any);
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(2);
+    const fallbackRequest = mockGenerateObject.mock.calls[1][0];
+    expect(fallbackRequest.schema).toBeUndefined();
+    expect(fallbackRequest.output).toBe("no-schema");
+    expect(fallbackRequest.prompt).toContain("JSON schema");
+    expect(result.object).toEqual({ name: "Ada", role: "none" });
   });
 
   it("falls back to next model on content-filter refusal without retrying primary", async () => {

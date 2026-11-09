@@ -17,6 +17,7 @@ import { useIntegrationActionsEnabled } from "@/hooks/useFeatureFlags";
 
 const actionNames: Record<ActionType, string> = {
   [ActionType.LABEL]: "Label",
+  [ActionType.REMOVE_LABEL]: "Remove label",
   [ActionType.MOVE_FOLDER]: "Move to folder",
   [ActionType.ARCHIVE]: "Archive",
   [ActionType.DELETE]: "Delete",

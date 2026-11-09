@@ -1,0 +1,2 @@
+# These run inside a Linux container, where CRLF breaks the shebang.
+* text eol=lf

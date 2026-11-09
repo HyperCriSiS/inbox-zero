@@ -42,6 +42,7 @@ const zodActionType = z.enum([
   ActionType.DRAFT_MESSAGING_CHANNEL,
   ActionType.FORWARD,
   ActionType.LABEL,
+  ActionType.REMOVE_LABEL,
   ActionType.MARK_SPAM,
   ActionType.NOTIFY_MESSAGING_CHANNEL,
   ActionType.REPLY,
@@ -131,6 +132,17 @@ const zodAction = z
         allowExisting: Boolean(data.id),
       })
     ) {
+      return;
+    }
+
+    if (data.type === ActionType.REMOVE_LABEL) {
+      if (!data.labelId?.value?.trim() && !data.labelId?.name?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Please choose the label to remove",
+          path: ["labelId"],
+        });
+      }
       return;
     }
 
@@ -375,6 +387,17 @@ const importedAction = z
   })
   .superRefine((data, ctx) => {
     if (addDisabledRuleActionIssue(data.type, ctx)) return;
+
+    if (data.type === ActionType.REMOVE_LABEL) {
+      if (!data.label?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Remove label action requires a label name",
+          path: ["label"],
+        });
+      }
+      return;
+    }
 
     if (data.type === ActionType.LABEL) {
       const labelValue = data.label?.trim();

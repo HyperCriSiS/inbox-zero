@@ -419,7 +419,9 @@ function ActionCard({
         )}
       >
         <div>
-          {field.name === "labelId" && actionType === ActionType.LABEL ? (
+          {field.name === "labelId" &&
+          (actionType === ActionType.LABEL ||
+            actionType === ActionType.REMOVE_LABEL) ? (
             <div>
               <div className="flex items-center gap-2">
                 {isAiGenerated ? (
@@ -451,10 +453,14 @@ function ActionCard({
                         id: value,
                         name: fieldValue?.name || null,
                       }}
-                      onChangeValue={(newValue: string) => {
+                      onChangeValue={(label) => {
                         setValue(
                           `actions.${index}.${field.name}.value`,
-                          newValue,
+                          label.id,
+                        );
+                        setValue(
+                          `actions.${index}.${field.name}.name`,
+                          label.name,
                         );
                       }}
                       emailAccountId={emailAccountId}

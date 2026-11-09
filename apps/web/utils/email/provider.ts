@@ -3,6 +3,8 @@ import {
   getOutlookClientForEmail,
 } from "@/utils/email-account-client";
 import { GmailProvider } from "@/utils/email/google";
+import { ImapProvider } from "@/utils/email/imap";
+import { getImapConfig } from "@/utils/imap/config";
 import { OutlookProvider } from "@/utils/email/microsoft";
 import type { EmailProvider } from "@/utils/email/types";
 import { assertProviderNotRateLimited } from "@/utils/email/rate-limit";
@@ -10,6 +12,8 @@ import { toRateLimitProvider } from "@/utils/email/rate-limit-mode-error";
 import { recordEmailAccountProviderIssue } from "@/utils/email/provider-health";
 import type { Logger } from "@/utils/logger";
 import { flushLoggerSafely } from "@/utils/logger-flush";
+import { withReviewBeforeDelete } from "@/utils/email/review-before-delete";
+import { env } from "@/env";
 
 export async function createEmailProvider({
   emailAccountId,
@@ -31,20 +35,36 @@ export async function createEmailProvider({
       source: "create-email-provider",
     });
 
+    if (rateLimitProvider === "imap") {
+      return withProviderFailureLogging(
+        reviewBeforeDelete(
+          new ImapProvider(await getImapConfig(emailAccountId), logger),
+          logger,
+        ),
+        { emailAccountId, provider: rateLimitProvider, logger },
+      );
+    }
+
     if (rateLimitProvider === "google") {
       const client = await getGmailClientForEmail({ emailAccountId, logger });
       return withProviderFailureLogging(
-        new GmailProvider(client, logger, emailAccountId),
+        reviewBeforeDelete(
+          new GmailProvider(client, logger, emailAccountId),
+          logger,
+        ),
         { emailAccountId, provider: rateLimitProvider, logger },
       );
     }
 
     const client = await getOutlookClientForEmail({ emailAccountId, logger });
-    return withProviderFailureLogging(new OutlookProvider(client, logger), {
-      emailAccountId,
-      provider: rateLimitProvider,
-      logger,
-    });
+    return withProviderFailureLogging(
+      reviewBeforeDelete(new OutlookProvider(client, logger), logger),
+      {
+        emailAccountId,
+        provider: rateLimitProvider,
+        logger,
+      },
+    );
   } catch (error) {
     logger.warn("Failed to create email provider", {
       error,
@@ -81,7 +101,7 @@ function withProviderFailureLogging(
     logger,
   }: {
     emailAccountId: string;
-    provider: "google" | "microsoft";
+    provider: EmailProvider["name"];
     logger: Logger;
   },
 ): EmailProvider {
@@ -153,7 +173,7 @@ async function logProviderOperationFailure({
 }: {
   error: unknown;
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: EmailProvider["name"];
   logger: Logger;
   operation: string;
   failedAccessToken?: string;
@@ -208,7 +228,7 @@ async function recordProviderIssueSafely({
 type ProviderOperationFailureLogInput = {
   error: unknown;
   emailAccountId: string;
-  provider: "google" | "microsoft";
+  provider: EmailProvider["name"];
   logger: Logger;
   operation: string;
   failedAccessToken?: string;
@@ -222,5 +242,13 @@ function isPromiseLike(value: unknown): value is Promise<unknown> {
     typeof value.then === "function" &&
     "catch" in value &&
     typeof value.catch === "function"
+  );
+}
+
+function reviewBeforeDelete(provider: EmailProvider, logger: Logger) {
+  return withReviewBeforeDelete(
+    provider,
+    env.REVIEW_BEFORE_DELETE_LABEL,
+    logger,
   );
 }

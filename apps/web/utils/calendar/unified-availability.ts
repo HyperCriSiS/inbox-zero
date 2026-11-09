@@ -7,10 +7,14 @@ import { getCalendarAvailabilityErrorLogContext } from "./availability-error";
 import { createGoogleAvailabilityProvider } from "./providers/google-availability";
 import { createMicrosoftAvailabilityProvider } from "./providers/microsoft-availability";
 import { isGoogleVirtualCalendarId } from "./providers/google-calendar-id";
-import { isGoogleProvider } from "@/utils/email/provider-types";
+import {
+  isCalDavProvider,
+  isGoogleProvider,
+} from "@/utils/email/provider-types";
+import { CalDavCalendarProvider } from "./providers/caldav";
 
 /**
- * Fetch calendar availability across all connected calendars (Google and Microsoft)
+ * Fetch calendar availability across all connected calendars (Google, Microsoft and CalDAV)
  */
 export async function getUnifiedCalendarAvailability({
   emailAccountId,
@@ -80,8 +84,45 @@ export async function getUnifiedCalendarAvailability({
   const microsoftConnections = calendarConnections.filter(
     (conn) => conn.provider === "microsoft",
   );
+  const calDavConnections = calendarConnections.filter((conn) =>
+    isCalDavProvider(conn.provider),
+  );
 
   const promises: Promise<BusyPeriod[]>[] = [];
+
+  // CalDAV has no reliable free/busy query across servers, so busy periods
+  // come from the events themselves.
+  for (const connection of calDavConnections) {
+    if (
+      !connection.calendars.length ||
+      !connection.caldavUrl ||
+      !connection.caldavPassword
+    ) {
+      continue;
+    }
+
+    const provider = new CalDavCalendarProvider({
+      serverUrl: connection.caldavUrl,
+      username: connection.caldavUsername ?? connection.email,
+      password: connection.caldavPassword,
+      email: connection.email,
+      connectionId: connection.id,
+      emailAccountId,
+    });
+
+    promises.push(
+      provider
+        .fetchBusyPeriods(new Date(timeMin), new Date(timeMax))
+        .catch((error) => {
+          logger.error("Error fetching CalDAV calendar availability", {
+            error,
+            connectionId: connection.id,
+          });
+          if (failClosed) throw error;
+          return [];
+        }),
+    );
+  }
 
   // Fetch Google calendar availability
   for (const connection of googleConnections) {

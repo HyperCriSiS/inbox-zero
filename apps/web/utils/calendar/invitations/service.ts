@@ -12,6 +12,7 @@ import {
   type InvitationResponse,
 } from "@/utils/calendar/invitations/parser";
 import {
+  isCalDavProvider,
   isGoogleProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
@@ -92,13 +93,31 @@ export async function respondToCalendarInvitation({
     logger,
   });
   if (match) {
-    await match.provider.respondToInvitation(
+    const result = await match.provider.respondToInvitation(
       match.event.id,
       invitation,
       response,
     );
+    // Google and Microsoft tell the organizer. CalDAV servers may not.
+    if (result?.organizerNotified !== false) {
+      return { response, calendarSynced: true };
+    }
+    await sendInvitationReply({ emailProvider, invitation, response });
     return { response, calendarSynced: true };
   }
+  await sendInvitationReply({ emailProvider, invitation, response });
+  return { response, calendarSynced: false };
+}
+
+async function sendInvitationReply({
+  emailProvider,
+  invitation,
+  response,
+}: {
+  emailProvider: EmailProvider;
+  invitation: CalendarInvitation;
+  response: InvitationResponse;
+}) {
   await emailProvider.sendEmail({
     to: invitation.organizer,
     subject: `Re: ${invitation.title}`,
@@ -111,7 +130,6 @@ export async function respondToCalendarInvitation({
       },
     ],
   });
-  return { response, calendarSynced: false };
 }
 
 async function getInvitationFromMessage(
@@ -181,12 +199,16 @@ async function findInvitationEvent({
   });
   const matches = [];
   for (const connection of connections) {
-    if (!connection.refreshToken) continue;
-    if (
-      !isGoogleProvider(connection.provider) &&
-      !isMicrosoftProvider(connection.provider)
-    )
-      continue;
+    if (isCalDavProvider(connection.provider)) {
+      if (!connection.caldavUrl || !connection.caldavPassword) continue;
+    } else {
+      if (!connection.refreshToken) continue;
+      if (
+        !isGoogleProvider(connection.provider) &&
+        !isMicrosoftProvider(connection.provider)
+      )
+        continue;
+    }
     const provider = createCalendarEventProvider({
       connection,
       emailAccountId,

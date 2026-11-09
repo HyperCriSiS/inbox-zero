@@ -23,6 +23,7 @@ import { createEmailProvider } from "@/utils/email/provider";
 import { classifyEmailAccountProviderIssue } from "@/utils/email/provider-health";
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 import { sendInboxHealthEmailBody } from "./validation";
@@ -151,7 +152,11 @@ async function sendEmail({
   } catch (error) {
     const provider = emailAccount.account.provider;
 
-    if (!isGoogleProvider(provider) && !isMicrosoftProvider(provider))
+    if (
+      !isGoogleProvider(provider) &&
+      !isMicrosoftProvider(provider) &&
+      !isImapProvider(provider)
+    )
       throw error;
 
     const issue = classifyEmailAccountProviderIssue({ error, provider });

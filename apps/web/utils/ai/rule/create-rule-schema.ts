@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ActionType, LogicalOperator } from "@/generated/prisma/enums";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { supportsFolders } from "@/utils/email/provider-types";
 import { isDefined } from "@/utils/types";
 import {
   getOnlyIntegrationToolSpec,
@@ -193,6 +193,10 @@ export const createRuleActionSchema = (
       ActionType.LABEL,
       createRequiredLabelFieldsSchema(provider),
     ),
+    createActionObjectSchema(
+      ActionType.REMOVE_LABEL,
+      createRequiredRemoveLabelFieldsSchema(provider),
+    ),
     createActionObjectSchema(ActionType.MARK_READ, optionalFieldsSchema),
     createActionObjectSchema(ActionType.STAR, optionalFieldsSchema),
     createActionObjectSchema(ActionType.MARK_SPAM, optionalFieldsSchema),
@@ -296,6 +300,8 @@ function getActionTypeDescription(type: ActionType) {
       return "Forward the matching email.";
     case ActionType.LABEL:
       return "Apply a label to the matching email.";
+    case ActionType.REMOVE_LABEL:
+      return "Remove a label from the matching email, for example to move it from one label to another together with a Label action.";
     case ActionType.ARCHIVE:
       return "Archive the matching email.";
     case ActionType.MARK_READ:
@@ -329,6 +335,16 @@ function createRequiredLabelFieldsSchema(provider: string) {
   });
 }
 
+function createRequiredRemoveLabelFieldsSchema(provider: string) {
+  return z.object({
+    ...createActionFieldShape(provider),
+    label: requiredStringField(
+      "The label to remove from the email",
+      "REMOVE_LABEL requires fields.label.",
+    ),
+  });
+}
+
 function createRequiredRecipientFieldsSchema(provider: string) {
   return z.object({
     ...createActionFieldShape(provider),
@@ -353,7 +369,9 @@ function createRequiredFolderFieldsSchema(provider: string) {
   const fieldShape = createActionFieldShape(provider);
 
   if (!("folderName" in fieldShape)) {
-    throw new Error("MOVE_FOLDER is only supported for Microsoft providers.");
+    throw new Error(
+      "MOVE_FOLDER is only supported for providers with folders.",
+    );
   }
 
   return z.object({
@@ -392,7 +410,7 @@ function createActionFieldShape(provider: string) {
     webhookUrl: optionalStringField(
       "The webhook URL to call. Only relevant for explicit webhook or external HTTP callback requests.",
     ),
-    ...(isMicrosoftProvider(provider) && {
+    ...(supportsFolders(provider) && {
       folderName: optionalStringField("The folder to move the email to"),
     }),
   };

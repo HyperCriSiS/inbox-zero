@@ -44,6 +44,9 @@ const connection: CalendarConnection = {
   refreshToken: "stored-refresh-token",
   expiresAt: new Date("2026-09-01T01:00:00.000Z"),
   isConnected: false,
+  caldavUrl: null,
+  caldavUsername: null,
+  caldavPassword: null,
 };
 
 describe("handleCalendarCallback", () => {

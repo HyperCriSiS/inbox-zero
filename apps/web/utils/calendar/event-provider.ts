@@ -5,10 +5,20 @@ import type { Logger } from "@/utils/logger";
 import type { CalendarEventProvider } from "@/utils/calendar/event-types";
 import { GoogleCalendarEventProvider } from "@/utils/calendar/providers/google-events";
 import { MicrosoftCalendarEventProvider } from "@/utils/calendar/providers/microsoft-events";
+import { CalDavCalendarProvider } from "@/utils/calendar/providers/caldav";
 import {
+  isCalDavProvider,
   isGoogleProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
+
+// What createCalendarEventProvider needs from a CalDAV connection.
+export const calDavConnectionSelect = {
+  email: true,
+  caldavUrl: true,
+  caldavUsername: true,
+  caldavPassword: true,
+} satisfies Prisma.CalendarConnectionSelect;
 
 export const calendarConnectionProviderSelect = {
   id: true,
@@ -16,6 +26,7 @@ export const calendarConnectionProviderSelect = {
   accessToken: true,
   refreshToken: true,
   expiresAt: true,
+  ...calDavConnectionSelect,
 } satisfies Prisma.CalendarConnectionSelect;
 
 export type CalendarConnectionForProvider =
@@ -97,6 +108,8 @@ export async function hasUsableCalendarConnection(emailAccountId: string) {
     select: {
       provider: true,
       refreshToken: true,
+      caldavUrl: true,
+      caldavPassword: true,
     },
   });
 
@@ -114,10 +127,14 @@ export function createCalendarEventProvider({
     id: string;
     provider: string;
     refreshToken: string | null;
-  };
+  } & CalDavConnectionFields;
   emailAccountId: string;
   logger: Logger;
 }) {
+  if (isCalDavProvider(connection.provider)) {
+    return createCalDavEventProvider(connection, emailAccountId);
+  }
+
   const providerParams = {
     accessToken: connection.accessToken,
     connectionId: connection.id,
@@ -140,11 +157,44 @@ export function createCalendarEventProvider({
 function isUsableCalendarConnection(connection: {
   provider: string;
   refreshToken: string | null;
+  caldavUrl?: string | null;
+  caldavPassword?: string | null;
 }) {
+  if (isCalDavProvider(connection.provider)) {
+    return !!connection.caldavUrl && !!connection.caldavPassword;
+  }
   if (!connection.refreshToken) return false;
 
   return (
     isGoogleProvider(connection.provider) ||
     isMicrosoftProvider(connection.provider)
   );
+}
+
+type CalDavConnectionFields = {
+  email?: string;
+  caldavUrl?: string | null;
+  caldavUsername?: string | null;
+  caldavPassword?: string | null;
+};
+
+function createCalDavEventProvider(
+  connection: { id: string } & CalDavConnectionFields,
+  emailAccountId: string,
+) {
+  if (
+    !connection.caldavUrl ||
+    !connection.caldavPassword ||
+    !connection.email
+  ) {
+    throw new SafeError("CalDAV connection is missing its server or password");
+  }
+  return new CalDavCalendarProvider({
+    serverUrl: connection.caldavUrl,
+    username: connection.caldavUsername ?? connection.email,
+    password: connection.caldavPassword,
+    email: connection.email,
+    connectionId: connection.id,
+    emailAccountId,
+  });
 }

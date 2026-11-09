@@ -58,8 +58,8 @@ services:
       - all
 
   web:
-    image: ghcr.io/elie222/inbox-zero:latest
-    pull_policy: always
+    image: ${INBOX_ZERO_IMAGE:-ghcr.io/elie222/inbox-zero:latest}
+    pull_policy: ${INBOX_ZERO_PULL_POLICY:-always}
     env_file:
       - path: ${INBOX_ZERO_ENV_FILE:-./apps/web/.env}
         required: false
@@ -86,8 +86,8 @@ services:
     restart: always
 
   worker:
-    image: ghcr.io/elie222/inbox-zero:latest
-    pull_policy: always
+    image: ${INBOX_ZERO_IMAGE:-ghcr.io/elie222/inbox-zero:latest}
+    pull_policy: ${INBOX_ZERO_PULL_POLICY:-always}
     command: ["/app/docker/scripts/start-worker.sh"]
     env_file:
       - path: ${INBOX_ZERO_ENV_FILE:-./apps/web/.env}
@@ -149,6 +149,12 @@ services:
         ) &
         (
           while true; do
+            curl -s -X GET 'http://web:3000/api/imap/poll' -H \"Authorization: Bearer $${CRON_SECRET}\" > /dev/null || echo \"[cron] Warning: imap poll failed\"
+            sleep 60
+          done
+        ) &
+        (
+          while true; do
             echo \"[cron] Scheduling meeting recorder bots...\"
             curl -s -X GET 'http://web:3000/api/meeting-recorder/schedule' -H \"Authorization: Bearer $${CRON_SECRET}\" || echo \"[cron] Warning: meeting-recorder request failed\"
             sleep 300
@@ -164,7 +170,7 @@ services:
         (
           sleep 300
           while true; do
-            for job in reasoning-retention mobile-push-retention email-send-operation-retention draft-cleanup; do
+            for job in reasoning-retention mobile-push-retention email-send-operation-retention draft-cleanup label-cleanup; do
               echo \"[cron] Running $${job}...\"
               curl -fsS -X GET \"http://web:3000/api/cron/$${job}\" -H \"Authorization: Bearer $${CRON_SECRET}\" || echo \"[cron] Warning: $${job} request failed\"
             done

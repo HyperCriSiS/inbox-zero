@@ -1,5 +1,6 @@
 import {
   isGoogleProvider,
+  isImapProvider,
   isMicrosoftProvider,
 } from "@/utils/email/provider-types";
 import type { Logger } from "@/utils/logger";
@@ -77,6 +78,9 @@ export async function processProviderHistory({
         }));
     return;
   }
+
+  // IMAP is polled, so there is no history for an admin reconcile to replay here.
+  if (isImapProvider(provider)) return;
 
   throw new Error(`Unsupported provider: ${provider}`);
 }

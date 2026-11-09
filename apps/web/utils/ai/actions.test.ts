@@ -462,6 +462,71 @@ describe("runActionFunction", () => {
     expect(client.starMessage).toHaveBeenCalledWith("message-1");
   });
 
+  describe("remove label", () => {
+    const executedRule = {
+      id: "executed-rule-1",
+      threadId: "thread-1",
+      emailAccountId: "account-1",
+      ruleId: "rule-1",
+    } as any;
+
+    it("removes the stored label from the thread", async () => {
+      const client = createMockEmailProvider();
+
+      await runActionFunction({
+        client,
+        email,
+        action: {
+          id: "action-1",
+          type: ActionType.REMOVE_LABEL,
+          labelId: "Label_todo",
+          label: "To do",
+        },
+        emailAccount,
+        executedRule,
+        logger,
+      });
+
+      expect(client.removeThreadLabel).toHaveBeenCalledWith(
+        "thread-1",
+        "Label_todo",
+      );
+      expect(client.getLabelByName).not.toHaveBeenCalled();
+    });
+
+    it("looks the label up by name without creating it", async () => {
+      const client = createMockEmailProvider({
+        getLabelByName: vi
+          .fn()
+          .mockResolvedValueOnce({ id: "Label_todo", name: "To do" })
+          .mockResolvedValueOnce(null),
+      });
+      const run = () =>
+        runActionFunction({
+          client,
+          email,
+          action: {
+            id: "action-1",
+            type: ActionType.REMOVE_LABEL,
+            label: "To do",
+          },
+          emailAccount,
+          executedRule,
+          logger,
+        });
+
+      await run();
+      await run();
+
+      expect(client.removeThreadLabel).toHaveBeenCalledTimes(1);
+      expect(client.removeThreadLabel).toHaveBeenCalledWith(
+        "thread-1",
+        "Label_todo",
+      );
+      expect(client.createLabel).not.toHaveBeenCalled();
+    });
+  });
+
   it("marks notify messaging actions failed when missing a channel id", async () => {
     const client = createMockEmailProvider();
 

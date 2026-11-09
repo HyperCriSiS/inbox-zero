@@ -172,6 +172,9 @@ model EmailAccount {
   watchEmailsSubscriptionId      String? // For Outlook subscription ID
   watchEmailsSubscriptionHistory Json? // Historical Outlook subscription IDs: [{ subscriptionId, createdAt, replacedAt }]
   lastSyncedHistoryId            String?
+  imapConnection                 ImapConnection?
+  labelCleanups                  LabelCleanup[]
+  bulkRuleRuns                   BulkRuleRun[]
   behaviorProfile                Json?
   personaAnalysis                Json? // ai analysis of the user's persona
   role                           String? // the role confirmed by the user - previously `User.surveyRole`
@@ -197,6 +200,11 @@ model EmailAccount {
 
   mailLayout          MailLayout @default(LIST)
   mailExpandedPreview Boolean    @default(false)
+  /// Collapses threads from bundled splits into one row each in the inbox.
+  /// Null until first turned on, which is when default bundles are chosen.
+  mailBundleInbox     Boolean?
+  mailDefaultSplitId  String?
+  mailSetup           MailSetupState @default(PENDING)
 
   includeInAllAccounts Boolean @default(true)
 
@@ -292,6 +300,9 @@ model MailSplit {
   /// Whether every filter must match, or any one of them ("Show mail matching
   /// all/any of these conditions"). A split with no filters is the plain inbox.
   matchAll  Boolean  @default(true)
+  /// Shown as one collapsed row in the inbox when the account bundles its inbox.
+  bundleInInbox Boolean @default(false)
+  hideFromAll   Boolean @default(false)
 
   emailAccountId String
   emailAccount   EmailAccount      @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
@@ -615,6 +626,8 @@ model Premium {
   stripeCancellationInitiatedAt  DateTime? // Timestamp of the event that first scheduled cancellation. Does not identify who initiated it.
   stripeCanceledAt               DateTime? // Stripe canceled_at: when cancellation was requested, which can precede the effective end in stripeEndedAt. Historical data.
   stripeEndedAt                  DateTime? // Timestamp for when the subscription ended permanently for any reason (cancellation, final payment failure). Historical data.
+  stripeCancellationFeedback     String? // Customer portal cancellation survey reason, e.g. 'too_expensive'.
+  stripeCancellationComment      String? // Customer portal cancellation survey free-text comment.
   stripeAiOverageLastInvoiceId   String?
   stripeAiOverageLastPeriodEnd   DateTime?
   stripeAiOverageLastUnits       Int?
@@ -905,6 +918,7 @@ model ExecutedAction {
   @@index([sentMessageIds], type: Gin)
   @@index([messagingChannelId, createdAt])
   @@index([draftStatus, createdAt], map: "ExecutedAction_draftStatus_createdAt_draft_idx", where: raw("\"draftId\" IS NOT NULL"))
+  @@index([executedRuleId], map: "ExecutedAction_executedRuleId_draft_idx", where: raw("\"draftId\" IS NOT NULL"))
 }
 
 model ScheduledAction {
@@ -1526,12 +1540,16 @@ model CalendarConnection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  provider     String // "google" or "microsoft"
+  provider     String // "google", "microsoft" or "caldav"
   email        String // Google account email (e.g., "elie@gmail.com")
   accessToken  String?
   refreshToken String?
   expiresAt    DateTime?
   isConnected  Boolean   @default(true)
+  // CalDAV only. The password is encrypted at rest like the tokens.
+  caldavUrl      String?
+  caldavUsername String?
+  caldavPassword String?
 
   emailAccountId String
   emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
@@ -1551,6 +1569,8 @@ model Calendar {
   description String?
   primary     Boolean @default(false)
   isEnabled   Boolean @default(true)
+  // CalDAV only: the server grants no write access, so events go elsewhere.
+  isReadOnly  Boolean @default(false)
   timezone    String?
 
   connectionId String
@@ -1910,7 +1930,7 @@ model DriveConnection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  provider     String // "google" or "microsoft"
+  provider     String // "google", "microsoft" or "caldav"
   email        String // can differ from emailAccount - e.g. connect work Drive to personal email
   accessToken  String?
   refreshToken String?
@@ -2182,6 +2202,7 @@ enum MobilePushTokenType {
 enum ActionType {
   ARCHIVE
   LABEL
+  REMOVE_LABEL
   REPLY
   SEND_EMAIL
   FORWARD
@@ -2225,6 +2246,12 @@ enum MailLayout {
   SPLIT
 }
 
+enum MailSetupState {
+  PENDING
+  SUGGESTED
+  DONE
+}
+
 enum MailSplitFilterKind {
   UNREAD
   STARRED
@@ -2247,6 +2274,7 @@ enum DraftEmailStatus {
   CLEANED_UP_UNUSED
   MISSING_FROM_PROVIDER
   USER_EDITED
+  CLEANUP_SKIPPED
 }
 
 enum ReplyMemoryKind {
@@ -2913,4 +2941,181 @@ model LoopsEmailSource {
   @@unique([campaignId], map: "LoopsEmailSource_campaignId_unversioned_key", where: { emailMessageId: null, campaignId: { not: null } })
   @@index([loopId])
   @@index([campaignId])
+}
+
+model ImapConnection {
+  id                   String    @id @default(cuid())
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  emailAccountId       String    @unique
+  imapHost             String
+  imapPort             Int
+  imapSecurity         String // "tls" | "starttls" | "none"
+  smtpHost             String
+  smtpPort             Int
+  smtpSecurity         String // "tls" | "starttls" | "none"
+  username             String
+  password             String // Encrypted by the prisma extension
+  tlsPinnedCertPem     String?   @db.Text // Self-signed certificate, e.g. Proton Mail Bridge
+  capabilities         String[]
+  labelStrategy        String    @default("database") // "keywords" | "folders" | "database"
+  labels               String[] // Label names for the "keywords" and "database" strategies
+  syncLeaseOwner       String?
+  syncLeaseUntil       DateTime?
+  lastSyncedAt         DateTime?
+  lastSyncError        String?
+  changesPrunedThrough BigInt    @default(0)
+
+  emailAccount EmailAccount   @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+  mailboxes    ImapMailbox[]
+  messages     ImapMessage[]
+  syncItems    ImapSyncItem[]
+  changes      ImapChange[]
+  filters      ImapFilter[]
+}
+
+model ImapMailbox {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  connectionId  String
+  path          String
+  role          String? // "inbox" | "sent" | "drafts" | "trash" | "junk" | "archive"
+  uidValidity   BigInt
+  lastSeenUid   BigInt   @default(0)
+  highestModseq BigInt?
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  messages   ImapMessage[]
+
+  @@unique([connectionId, path])
+}
+
+// `id` is the message ID the app sees. The IMAP location changes on every move.
+model ImapMessage {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  connectionId    String
+  mailboxId       String
+  uidValidity     BigInt
+  uid             BigInt
+  threadId        String
+  rfc822MessageId String?
+  objectId        String? // RFC 8474 OBJECTID, stable across moves when offered
+  references      String[] // Normalized ancestors, to find replies synced before a parent
+  labels          String[] // Only used by the "database" label strategy
+  flags           String[]
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  mailbox    ImapMailbox    @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, uidValidity, uid])
+  @@index([connectionId, threadId])
+  @@index([connectionId, rfc822MessageId])
+  @@index([connectionId, objectId])
+  @@index([references], type: Gin)
+}
+
+model ImapSyncItem {
+  connectionId String
+  messageId    String
+  createdAt    DateTime  @default(now())
+  processedAt  DateTime?
+  attempts     Int       @default(0)
+  lastError    String?
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@id([connectionId, messageId])
+  @@index([connectionId, processedAt])
+}
+
+// Feed for the local mail client. Rows are never reused, so a cursor is an ID.
+model ImapChange {
+  id           BigInt   @id @default(autoincrement())
+  createdAt    DateTime @default(now())
+  connectionId String
+  messageId    String
+  kind         String // "upsert" | "delete"
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, id])
+}
+
+// IMAP has no filter API here, so these run in the app when new mail is synced.
+model ImapFilter {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  connectionId String
+  from         String
+  archive      Boolean  @default(false)
+  addLabelIds  String[]
+
+  connection ImapConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, from])
+}
+
+enum LabelCleanupAction {
+  REMOVE_LABEL
+  ARCHIVE
+  TRASH
+}
+
+// Clears out mail that rules filed under a label once it is old enough.
+model LabelCleanup {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  labelId      String
+  labelName    String
+  afterDays    Int
+  action       LabelCleanupAction
+  lastRunAt    DateTime?
+  lastRunCount Int?
+
+  emailAccountId String
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([emailAccountId, labelId])
+}
+
+enum BulkRuleRunStatus {
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+// Bulk processing of past mail, driven by a background job instead of the
+// browser, so it keeps going with the tab closed.
+model BulkRuleRun {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  status           BulkRuleRunStatus @default(RUNNING)
+  startDate        DateTime
+  endDate          DateTime?
+  includeRead      Boolean           @default(false)
+  rerun            Boolean           @default(false)
+  skipDraftReplies Boolean           @default(true)
+  // Threads older than this are still to do, so archived mail cannot shift pages.
+  cursorBefore     DateTime?
+  leaseOwner       String?
+  leaseUntil       DateTime?
+  processed        Int               @default(0)
+  skipped          Int               @default(0)
+  failed           Int               @default(0)
+  lastError        String?
+  finishedAt       DateTime?
+
+  emailAccountId String
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@index([emailAccountId, createdAt])
 }

@@ -83,6 +83,8 @@ export const runActionFunction = async (options: {
       return archive(opts);
     case ActionType.LABEL:
       return label(opts);
+    case ActionType.REMOVE_LABEL:
+      return remove_label(opts);
     case ActionType.DRAFT_EMAIL:
       return draft(opts);
     case ActionType.DRAFT_MESSAGING_CHANNEL:
@@ -190,6 +192,29 @@ const label: ActionFunction<{
       }),
     );
   }
+};
+
+const remove_label: ActionFunction<{
+  label?: string | null;
+  labelId?: string | null;
+}> = async ({ client, email, args, logger }) => {
+  let labelId = args.labelId;
+
+  if (!labelId && args.label) {
+    if (hasVariables(args.label)) {
+      logger.error("Template label not processed by AI", { label: args.label });
+      return;
+    }
+    // A label that does not exist is on no thread, so there is nothing to do.
+    labelId = (await client.getLabelByName(args.label))?.id;
+  }
+
+  if (!labelId) {
+    logger.info("Label to remove not found", { label: args.label });
+    return;
+  }
+
+  await client.removeThreadLabel(email.threadId, labelId);
 };
 
 const draft: ActionFunction<{

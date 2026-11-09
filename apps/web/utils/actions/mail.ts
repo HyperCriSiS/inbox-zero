@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { markTrackedDraftDeleted } from "@/utils/ai/draft-cleanup";
 import prisma from "@/utils/prisma";
 import { removeLabelFromMailSplits } from "@/utils/split-inbox/splits.server";
 import { sendEmailBody } from "@/utils/types/mail";
@@ -20,10 +21,11 @@ import {
 import {
   isGoogleProvider,
   isMicrosoftProvider,
+  supportsFolders,
 } from "@/utils/email/provider-types";
 import { isGmailLabelColor } from "@/utils/gmail/label-colors";
 import { getOutlookCategoryPreset } from "@/utils/outlook/category-colors";
-import { markTrackedDraftDeleted } from "@/utils/ai/draft-cleanup";
+import { resetDefaultLabelColors } from "@/utils/label/reset-label-colors";
 
 import {
   saveComposeDraft,
@@ -320,6 +322,24 @@ export const updateMailboxItemAction = actionClient
     },
   );
 
+export const resetLabelColorsAction = actionClient
+  .metadata({ name: "resetLabelColors" })
+  .action(async ({ ctx: { emailAccountId, provider, logger } }) => {
+    const emailProvider = await createEmailProvider({
+      emailAccountId,
+      provider,
+      logger,
+    });
+    const result = await resetDefaultLabelColors({
+      emailAccountId,
+      emailProvider,
+      logger,
+    });
+    if (result.failed > 0 && result.updated === 0)
+      throw new SafeError("Failed to reset label colors. Please try again.");
+    return result;
+  });
+
 export const deleteMailboxItemAction = actionClient
   .metadata({ name: "deleteMailboxItem" })
   .inputSchema(deleteMailboxItemBody)
@@ -465,48 +485,6 @@ export const updateDraftAction = actionClient
     },
   );
 
-export const deleteDraftAction = actionClient
-  .metadata({ name: "deleteDraft" })
-  .inputSchema(
-    z.object({ draftMessageId: z.string(), draftId: z.string().optional() }),
-  )
-  .action(
-    async ({
-      ctx: { emailAccountId, provider: providerName, logger },
-      parsedInput: { draftMessageId, draftId },
-    }) => {
-      const provider = await createEmailProvider({
-        emailAccountId,
-        provider: providerName,
-        logger,
-      });
-      const draft = draftId
-        ? await provider
-            .getDraft(draftId)
-            .then((message) =>
-              message ? provider.getDraftReferenceForMessage(message.id) : null,
-            )
-        : await provider.getDraftReferenceForMessage(draftMessageId);
-      // Already sent, deleted, or replaced elsewhere: nothing left to discard.
-      if (!draft) return;
-
-      const wasDeleted = await provider.deleteDraft(draft.id, draft.version);
-      if (!wasDeleted) return;
-
-      try {
-        await markTrackedDraftDeleted({
-          draftId: draft.id,
-          emailAccountId,
-          logger,
-        });
-      } catch (error) {
-        logger.error("Failed to update tracking after deleting draft", {
-          error,
-        });
-      }
-    },
-  );
-
 function assertMailboxItemMutationSupported({
   kind,
   provider,
@@ -514,9 +492,9 @@ function assertMailboxItemMutationSupported({
   kind: "label" | "folder";
   provider: string;
 }) {
-  if (kind === "folder" && !isMicrosoftProvider(provider)) {
+  if (kind === "folder" && !supportsFolders(provider)) {
     throw new SafeError(
-      "Folder actions are only available for Outlook accounts.",
+      "Folder actions are not available for this account.",
     );
   }
 }
@@ -534,9 +512,13 @@ export const saveComposeDraftAction = actionClient
         provider: providerName,
         logger,
       });
+      const { composeSessionId, ...draft } = parsedInput;
       const saved = await saveComposeDraft({
         provider,
-        ...parsedInput,
+        ...draft,
+        ...(composeSessionId
+          ? { composeSession: { id: composeSessionId, emailAccountId, logger } }
+          : {}),
       });
       return saved;
     },
@@ -556,6 +538,16 @@ export const discardComposeDraftAction = actionClient
         logger,
       });
       await discardComposeDraft({ provider, ...parsedInput });
+      // An AI draft discarded here mustn't stay listed for cleanup.
+      await markTrackedDraftDeleted({
+        draftId: parsedInput.draftId,
+        emailAccountId,
+        logger,
+      }).catch((error) => {
+        logger.error("Failed to update tracking after deleting draft", {
+          error,
+        });
+      });
       return { success: true };
     },
   );

@@ -6,9 +6,11 @@ import {
   toggleCalendarBody,
   updateTimezoneBody,
   updateBookingLinkBody,
+  connectCalDavCalendarBody,
 } from "@/utils/actions/calendar.validation";
 import prisma from "@/utils/prisma";
 import { SafeError } from "@/utils/error";
+import { connectCalDavCalendar } from "@/utils/calendar/caldav-connect";
 
 export const disconnectCalendarAction = actionClient
   .metadata({ name: "disconnectCalendar" })
@@ -90,3 +92,10 @@ export const updateCalendarBookingLinkAction = actionClient
       data: { calendarBookingLink: bookingLink || null },
     });
   });
+
+export const connectCalDavCalendarAction = actionClient
+  .metadata({ name: "connectCalDavCalendar" })
+  .inputSchema(connectCalDavCalendarBody)
+  .action(async ({ ctx: { emailAccountId, logger }, parsedInput }) =>
+    connectCalDavCalendar({ emailAccountId, logger, ...parsedInput }),
+  );

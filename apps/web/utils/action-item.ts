@@ -47,6 +47,14 @@ export const actionInputs: Record<
       },
     ],
   },
+  [ActionType.REMOVE_LABEL]: {
+    fields: [
+      {
+        name: "labelId",
+        label: "Label",
+      },
+    ],
+  },
   [ActionType.DIGEST]: { fields: [] },
   [ActionType.DRAFT_EMAIL]: { fields: DRAFT_REPLY_FIELDS },
   [ActionType.DRAFT_MESSAGING_CHANNEL]: { fields: DRAFT_REPLY_FIELDS },
@@ -286,7 +294,8 @@ export function sanitizeActionFields(
         folderId: action.folderId ?? null,
       };
     }
-    case ActionType.LABEL: {
+    case ActionType.LABEL:
+    case ActionType.REMOVE_LABEL: {
       return {
         ...base,
         label: action.label ?? null,

@@ -14,11 +14,12 @@ import { decryptToken, encryptToken } from "@/utils/encryption";
  */
 const ENCRYPTED_FIELDS = {
   account: ["access_token", "refresh_token"],
-  calendarConnection: ["accessToken", "refreshToken"],
+  calendarConnection: ["accessToken", "refreshToken", "caldavPassword"],
   driveConnection: ["accessToken", "refreshToken"],
   messagingChannel: ["accessToken", "refreshToken"],
   mcpConnection: ["accessToken", "refreshToken", "apiKey"],
   mcpIntegration: ["oauthClientSecret"],
+  imapConnection: ["password"],
   // The raw join link carries the meeting password for Zoom and Teams. Dedup
   // queries use normalizedMeetingUrl and activeKey, never this field, so
   // encrypting it does not break any lookup.

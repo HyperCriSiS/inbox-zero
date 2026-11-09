@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/button";
 import { toastError } from "@/components/Toast";
 import { useAccount } from "@/providers/EmailAccountProvider";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import {
+  isImapProvider,
+  isMicrosoftProvider,
+} from "@/utils/email/provider-types";
 import { mailEngineConnectionCopy } from "@/utils/mail-engine/connection-notice";
 import { redirectToSafeUrl } from "@/utils/redirect";
 
@@ -64,6 +67,11 @@ export const MailEngineConnectionBanner = memo(
             <Button
               disabled={reconnecting || !emailAccountId}
               onClick={() => {
+                // IMAP has no OAuth flow, so the password is replaced on the accounts page.
+                if (isImapProvider(provider)) {
+                  redirectToSafeUrl("/accounts");
+                  return;
+                }
                 setReconnecting(true);
                 getAccountLinkingUrl(
                   isMicrosoftProvider(provider) ? "microsoft" : "google",

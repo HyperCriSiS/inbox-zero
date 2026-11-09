@@ -1,0 +1,14 @@
+set timeout 120
+spawn bridge --cli
+expect ">>>"
+send "login\r"
+expect "sername:"
+send "qauser\r"
+expect "assword:"
+send "$env(FAKE_PASS)\r"
+expect -re "(was added|successfully|Account).*>>>"
+sleep 5
+send "info\r"
+expect ">>>"
+set timeout -1
+expect eof

@@ -98,7 +98,11 @@ export async function handleLabelAddedEvent(
   );
 }
 
-async function learnColdEmailFromSpam({
+/**
+ * Learns the sender of a junked thread as a cold emailer, unless it is a
+ * conversation or a known contact. Also used for IMAP moves into Junk.
+ */
+export async function learnColdEmailFromSpam({
   sender,
   messageId,
   threadId,
@@ -109,7 +113,7 @@ async function learnColdEmailFromSpam({
   sender: string;
   messageId: string;
   threadId: string;
-  emailAccount: EmailAccountWithAI;
+  emailAccount: Pick<EmailAccountWithAI, "id" | "email">;
   provider: EmailProvider;
   logger: Logger;
 }) {

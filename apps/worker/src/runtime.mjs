@@ -10,6 +10,8 @@ const DEFAULT_QUEUES = [
   { name: "email-digest-all", concurrency: 3 },
   { name: "email-inbox-health-all", concurrency: 3 },
   { name: "draft-cleanup", concurrency: 3 },
+  { name: "imap-sync", concurrency: 3 },
+  { name: "bulk-rule-run", concurrency: 3 },
 ];
 
 export async function startWorkerRuntime({

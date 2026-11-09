@@ -4,20 +4,30 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import { useModal } from "@/hooks/useModal";
 import { useAccounts } from "@/hooks/useAccounts";
-import { ComposeEmailFormLazy } from "@/app/(app)/[emailAccountId]/compose/ComposeEmailFormLazy";
+import {
+  ComposeEmailFormLazy,
+  preloadComposeEmailForm,
+} from "@/app/(app)/[emailAccountId]/compose/ComposeEmailFormLazy";
+import type { GetSignatureResponse } from "@/app/api/user/signature/route";
+import type { GetSendAsResponse } from "@/app/api/user/send-as/route";
+import { getAccountScopedKey } from "@/utils/swr";
 import type { ReplyingToEmail } from "@/app/(app)/[emailAccountId]/compose/ComposeEmailForm";
 import { useAccount } from "@/providers/EmailAccountProvider";
-import { deleteDraftAction } from "@/utils/actions/mail";
 import { getActiveMailClient } from "@/utils/mail-engine/active-client";
-import type { ReplyDraftMode } from "@/utils/mail-engine/reply-drafts";
-import { getActionErrorMessage } from "@/utils/error";
+import { discardMailboxDraft } from "@/utils/mail-engine/discard-mailbox-draft";
+import {
+  getDraftSessionMessageIds,
+  type ReplyDraftMode,
+} from "@/utils/mail-engine/reply-drafts";
 import { toastError } from "@/components/Toast";
 import {
   Dialog,
@@ -46,6 +56,9 @@ type Context = {
   poppedOutDraftSessionId?: string;
 };
 
+// Fetched once per mail visit; an open composer revalidates as usual.
+const WARM_ONLY = { revalidateOnFocus: false, revalidateOnReconnect: false };
+
 const ComposeModalContext = createContext<Context>({
   onOpen: async () => {},
   popOutReply: () => {},
@@ -70,6 +83,24 @@ export function ComposeModalProvider(props: { children: React.ReactNode }) {
   const isAllAccountsMailView =
     isMailView && searchParams.get("accountScope") === "all";
   const { data: accountsData } = useAccounts(isAllAccountsMailView);
+  // The composer waits for its code, signature and send-as addresses, so they
+  // are fetched while mail is open (and kept across reloads by the SWR
+  // snapshot) and a shortcut opens it at once.
+  useSWR<GetSignatureResponse>(
+    isMailView
+      ? getAccountScopedKey("/api/user/signature", emailAccountId)
+      : null,
+    WARM_ONLY,
+  );
+  useSWR<GetSendAsResponse>(
+    isMailView
+      ? getAccountScopedKey("/api/user/send-as", emailAccountId)
+      : null,
+    WARM_ONLY,
+  );
+  useEffect(() => {
+    if (isMailView) preloadComposeEmailForm();
+  }, [isMailView]);
   const isOpen = isModalOpen && (!poppedOutReply || Boolean(reply));
   const returnOpenReply = useCallback(() => {
     if (isOpen) reply?.onReturn?.();
@@ -101,25 +132,25 @@ export function ComposeModalProvider(props: { children: React.ReactNode }) {
   const discardReply = useCallback(
     async (draftId?: string) => {
       if (reply?.providerDraftMessageId) {
-        const result = await deleteDraftAction(reply.emailAccountId, {
-          draftMessageId: reply.providerDraftMessageId,
-          draftId,
-        }).catch(() => undefined);
-        if (
-          !result ||
-          result.serverError !== undefined ||
-          result.validationErrors !== undefined
-        ) {
+        try {
+          await discardMailboxDraft({
+            client: getActiveMailClient(),
+            emailAccountId: reply.emailAccountId,
+            messageIds: getDraftSessionMessageIds(
+              reply.emailAccountId,
+              reply.providerDraftMessageId,
+            ),
+            draftId,
+          });
+        } catch (error) {
           toastError({
-            description: getActionErrorMessage(result ?? {}, {
-              prefix: "Failed to discard draft",
-            }),
+            description:
+              error instanceof Error
+                ? error.message
+                : "Failed to discard draft",
           });
           return false;
         }
-        getActiveMailClient()
-          ?.requestSync([reply.emailAccountId])
-          .catch(() => {});
       }
       closeCompose();
       return true;

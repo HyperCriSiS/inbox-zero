@@ -3,18 +3,16 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { env } from "@/env";
 import { toastError } from "@/components/Toast";
 import Image from "next/image";
 import { MutedText } from "@/components/Typography";
+import { AddImapAccount } from "@/app/(app)/accounts/AddImapAccount";
 import { getAccountLinkingUrl } from "@/utils/account-linking";
 import { isGoogleProvider } from "@/utils/email/provider-types";
 import { redirectToSafeUrl } from "@/utils/redirect";
 
-export function AddAccount({
-  helperText = "You will be billed for each account.",
-}: {
-  helperText?: ReactNode;
-}) {
+export function AddAccount({ helperText }: { helperText: ReactNode }) {
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const [isLoadingMicrosoft, setIsLoadingMicrosoft] = useState(false);
 
@@ -42,7 +40,11 @@ export function AddAccount({
 
   return (
     <div className="flex flex-col items-center justify-center gap-3 min-h-[90px]">
-      <div className="flex items-center gap-2">
+      <div
+        className={
+          env.NEXT_PUBLIC_IMAP_ONLY ? "hidden" : "flex items-center gap-2"
+        }
+      >
         <Button
           variant="outline"
           className="w-full"
@@ -76,6 +78,8 @@ export function AddAccount({
           <span className="ml-2">Add Microsoft</span>
         </Button>
       </div>
+
+      <AddImapAccount />
 
       <MutedText>{helperText}</MutedText>
     </div>

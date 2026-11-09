@@ -541,6 +541,43 @@ describe("RuleForm", () => {
     expect(screen.queryByText("Please choose a chat destination")).toBeNull();
   });
 
+  it("explains why a rule without actions cannot be saved", async () => {
+    const view = render(
+      <RuleForm
+        alwaysEditMode
+        rule={{
+          id: "cmjzoasfv000004ld2qar07t3",
+          name: "Rule without actions",
+          instructions: null,
+          groupId: null,
+          runOnThreads: false,
+          digest: false,
+          conditionalOperator: LogicalOperator.AND,
+          conditions: [
+            {
+              type: ConditionType.STATIC,
+              from: "sender@example.com",
+              to: null,
+              subject: null,
+              body: null,
+              instructions: null,
+            },
+          ],
+          actions: [],
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      within(view.container).getByRole("button", { name: "Save" }),
+    );
+
+    expect(
+      await screen.findByText("You must have at least one action"),
+    ).toBeTruthy();
+    expect(mockUpdateRuleAction).not.toHaveBeenCalled();
+  });
+
   it("preserves the original action order when saving an unchanged rule", async () => {
     const view = render(
       <RuleForm

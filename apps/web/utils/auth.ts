@@ -19,6 +19,7 @@ import { after } from "next/server";
 import { env } from "@/env";
 import {
   assertAllowedAuthSignupEmail,
+  isPasswordLoginEnabled,
   isAllowedAuthSignupEmail,
 } from "@/utils/auth-signup-policy";
 import { trackDubSignUp } from "@/utils/dub";
@@ -47,7 +48,7 @@ import {
 } from "@/utils/premium/seats";
 import { applyPendingPremiumGrant } from "@/utils/premium/server";
 import { mobileAuthProviderCompletion } from "@/utils/mobile-auth/provider-completion";
-import { safeExpo } from "@/utils/mobile-auth/expo";
+import { nativeAuthPlugin } from "@/utils/mobile-auth/native-auth-plugin";
 import { clearAccountDisconnectedErrorIfResolved } from "@/utils/error-messages";
 import { getEnabledLoginProviders } from "@/utils/oauth/login-providers";
 import { getAppleClientSecret } from "@/utils/auth/apple-client-secret";
@@ -267,7 +268,8 @@ export const betterAuthConfig = betterAuth({
   ],
   secret: env.AUTH_SECRET || env.NEXTAUTH_SECRET,
   emailAndPassword: {
-    enabled: false,
+    enabled: isPasswordLoginEnabled(),
+    minPasswordLength: 12,
   },
   database: prismaAdapter(prisma, {
     provider: "postgresql",
@@ -281,7 +283,7 @@ export const betterAuthConfig = betterAuth({
     }),
     ...(env.SCIM_CREDENTIAL_HASH_SECRET ? [scim(getScimOptions())] : []),
     ...(genericOauthPlugin ? [genericOauthPlugin] : []),
-    ...(mobileAuthOrigins.length > 0 ? [safeExpo()] : []),
+    ...(mobileAuthOrigins.length > 0 ? [nativeAuthPlugin()] : []),
     // OAuth proxy for preview deployments (Google doesn't allow wildcard redirect URIs)
     ...(env.OAUTH_PROXY_URL || env.IS_OAUTH_PROXY_SERVER
       ? [

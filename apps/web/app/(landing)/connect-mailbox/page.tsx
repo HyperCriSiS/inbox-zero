@@ -37,14 +37,14 @@ export default async function ConnectMailboxPage(props: {
             Connect your mailbox
           </h1>
           <p className="mt-4 text-muted-foreground">
-            Connect Gmail or Outlook to start using {BRAND_NAME}.
+            Connect your mailbox to start using {BRAND_NAME}.
           </p>
         </div>
 
         <AddAccount helperText="You can add more mailboxes later from Accounts." />
 
         <MutedText className="text-center">
-          Google and Microsoft are used here only to connect your inbox data.
+          The connection is only used to access your inbox data.
         </MutedText>
       </div>
     </div>

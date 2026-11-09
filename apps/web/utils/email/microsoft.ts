@@ -35,7 +35,7 @@ import {
   getLabelById,
   OUTLOOK_COLOR_MAP,
 } from "@/utils/outlook/label";
-import type { InboxZeroLabel } from "@/utils/label";
+import type { InboxZeroLabel, LabelColorName } from "@/utils/label";
 import type { ThreadsQuery } from "@/utils/threads/validation";
 import {
   compileOutlookThreadSearch,
@@ -55,6 +55,7 @@ import {
   archiveThread,
   markReadThread,
   markStarredMessage,
+  moveThreadFromFolderIdToInbox,
   removeThreadLabel,
   unarchiveThread,
   untrashThread,
@@ -97,6 +98,7 @@ import type {
   SentMessagePage,
   BulkArchiveThread,
   BulkArchiveResult,
+  EmailLabelColor,
   EmailLabelUpdate,
   GetThreadOptions,
   SendEmailOptions,
@@ -112,9 +114,15 @@ import {
   removeOutlookDraftAttachment,
 } from "@/utils/outlook/draft-attachments";
 import type { SendEmailBody } from "@/utils/types/mail";
-import { getOutlookCategoryPreset } from "@/utils/outlook/category-colors";
+import {
+  getDefaultOutlookCategoryColor,
+  getOutlookCategoryPreset,
+} from "@/utils/outlook/category-colors";
 import { unwatchOutlook, watchOutlook } from "@/utils/outlook/watch";
-import { escapeODataString } from "@/utils/outlook/odata-escape";
+import {
+  encodeODataFilter,
+  escapeODataString,
+} from "@/utils/outlook/odata-escape";
 import { OutlookLabel } from "@/utils/outlook/constants";
 import { resolveOutlookCategoryName } from "@/utils/outlook/search-scope";
 import {
@@ -193,7 +201,9 @@ export class OutlookProvider implements EmailProvider {
         .top(1);
       if (categoryName) {
         request = request.filter(
-          `categories/any(c:c eq '${escapeODataString(categoryName)}')`,
+          encodeODataFilter(
+            `categories/any(c:c eq '${escapeODataString(categoryName)}')`,
+          ),
         );
       }
       return request.get();
@@ -330,7 +340,9 @@ export class OutlookProvider implements EmailProvider {
       .getClient()
       .api("/me/messages")
       .filter(
-        `internetMessageId eq '${escapeODataString(messageIdWithBrackets)}'`,
+        encodeODataFilter(
+          `internetMessageId eq '${escapeODataString(messageIdWithBrackets)}'`,
+        ),
       )
       .top(1)
       .get();
@@ -456,7 +468,7 @@ export class OutlookProvider implements EmailProvider {
         .orderby("sentDateTime desc");
 
       if (filters.length) {
-        request = request.filter(filters.join(" and "));
+        request = request.filter(encodeODataFilter(filters.join(" and ")));
       }
 
       return request;
@@ -516,7 +528,7 @@ export class OutlookProvider implements EmailProvider {
       .orderby("sentDateTime desc");
 
     if (filter) {
-      request = request.filter(filter);
+      request = request.filter(encodeODataFilter(filter));
     }
 
     const response = await request.get();
@@ -1232,6 +1244,14 @@ export class OutlookProvider implements EmailProvider {
     this.client.invalidateCategoryMapCache();
   }
 
+  getDefaultLabelColor(colorName: LabelColorName): EmailLabelColor {
+    return {
+      backgroundColor:
+        OUTLOOK_COLOR_MAP[getDefaultOutlookCategoryColor(colorName)],
+      textColor: "#000000",
+    };
+  }
+
   async updateLabel(labelId: string, update: EmailLabelUpdate): Promise<void> {
     if (update.name)
       throw new Error("Microsoft category names cannot be changed");
@@ -1632,7 +1652,7 @@ export class OutlookProvider implements EmailProvider {
     const response = await this.client
       .getClient()
       .api("/me/messages")
-      .filter(filter)
+      .filter(encodeODataFilter(filter))
       .select(MESSAGE_SELECT_FIELDS)
       .top(maxResults)
       .orderby("receivedDateTime DESC")
@@ -2118,7 +2138,7 @@ export class OutlookProvider implements EmailProvider {
         .top(maxResults);
 
       if (filter) {
-        request = request.filter(filter);
+        request = request.filter(encodeODataFilter(filter));
       }
 
       if (!fromEmail || domainFilter) {
@@ -2438,7 +2458,7 @@ export class OutlookProvider implements EmailProvider {
       this.client
         .getClient()
         .api("/me/messages")
-        .filter(receivedFilter)
+        .filter(encodeODataFilter(receivedFilter))
         .top(2)
         .select("id")
         .get(),
@@ -2565,6 +2585,25 @@ export class OutlookProvider implements EmailProvider {
     await this.moveMessageSnapshots(messageIds, "inbox");
   }
 
+  async moveMessagesToFolder(
+    messageIds: string[],
+    folderId: string,
+  ): Promise<void> {
+    await this.moveMessageSnapshots(messageIds, folderId);
+  }
+
+  async moveThreadFromFolderToInbox(
+    threadId: string,
+    folderId: string,
+  ): Promise<void> {
+    await moveThreadFromFolderIdToInbox({
+      client: this.client,
+      threadId,
+      folderId,
+      logger: this.logger,
+    });
+  }
+
   async markMessagesStarredState(
     messageIds: string[],
     starred: boolean,
@@ -2589,7 +2628,8 @@ export class OutlookProvider implements EmailProvider {
   ): Promise<void> {
     await mapWithConcurrency([...new Set(messageIds)], 4, async (messageId) => {
       try {
-        await withMicrosoftGraphWriteRetry(
+        // Idempotent absolute write: safe to retry on conflicts and network errors.
+        await withMicrosoftGraphRetry(
           () =>
             this.client
               .getClient()
@@ -2605,7 +2645,7 @@ export class OutlookProvider implements EmailProvider {
 
   private async moveMessageSnapshots(
     messageIds: string[],
-    destinationId: "archive" | "deleteditems" | "inbox",
+    destinationId: string,
   ) {
     await mapWithConcurrency([...new Set(messageIds)], 4, async (messageId) => {
       try {
@@ -2627,8 +2667,8 @@ export class OutlookProvider implements EmailProvider {
     fromEmails: string[],
     ownerEmail: string,
     emailAccountId: string,
-  ): Promise<void> {
-    await moveMessagesForSenders({
+  ): Promise<number> {
+    return moveMessagesForSenders({
       client: this.client,
       senders: fromEmails,
       destinationId: "archive",
@@ -3357,7 +3397,8 @@ async function fetchOutlookSearchPage({
         `categories/any(c:c eq '${escapeODataString(compiled.category)}')`,
       );
     }
-    if (filters.length) request = request.filter(filters.join(" and "));
+    if (filters.length)
+      request = request.filter(encodeODataFilter(filters.join(" and ")));
   }
 
   return request.top(Math.min(maxResults || 25, 25)).get();

@@ -15,7 +15,7 @@ import {
   RULE_ANALYTICS_EVENTS,
   trackRuleEvent,
 } from "@/utils/analytics/rule-events.server";
-import { isMicrosoftProvider } from "@/utils/email/provider-types";
+import { supportsFolders } from "@/utils/email/provider-types";
 import { createEmailProvider } from "@/utils/email/provider";
 import { resolveLabelNameAndId } from "@/utils/label/resolve-label";
 import { getMissingRecipientMessage } from "@/utils/rule/recipient-validation";
@@ -622,6 +622,19 @@ export async function deleteRule({
   ruleId: string;
   groupId?: string | null;
 }) {
+  let deletedGroup = false;
+  if (groupId) {
+    const deletedGroups = await prisma.group.deleteMany({
+      where: { id: groupId, emailAccountId },
+    });
+
+    deletedGroup = deletedGroups.count > 0;
+  }
+
+  if (!deletedGroup) {
+    await prisma.rule.delete({ where: { id: ruleId, emailAccountId } });
+  }
+
   after(() =>
     trackRuleEvent({
       emailAccountId,
@@ -629,16 +642,6 @@ export async function deleteRule({
       properties: { ruleId },
     }),
   );
-
-  if (groupId) {
-    const deletedGroups = await prisma.group.deleteMany({
-      where: { id: groupId, emailAccountId },
-    });
-
-    if (deletedGroups.count > 0) return;
-  }
-
-  await prisma.rule.delete({ where: { id: ruleId, emailAccountId } });
 }
 
 type RuleScopeKey =
@@ -744,7 +747,7 @@ async function mapActionFields(
         typeof a.fields?.folderName === "string" ? a.fields.folderName : null;
       let folderId: string | null = a.folderId || null;
 
-      if (a.type === ActionType.LABEL) {
+      if (a.type === ActionType.LABEL || a.type === ActionType.REMOVE_LABEL) {
         const emailProvider = await createEmailProvider({
           emailAccountId,
           provider,
@@ -764,7 +767,7 @@ async function mapActionFields(
         a.type === ActionType.MOVE_FOLDER &&
         folderName &&
         !folderId &&
-        isMicrosoftProvider(provider)
+        supportsFolders(provider)
       ) {
         const emailProvider = await createEmailProvider({
           emailAccountId,
@@ -791,7 +794,7 @@ async function mapActionFields(
         subject: a.fields?.subject,
         content: integrationFields ? null : a.fields?.content,
         url: a.fields?.webhookUrl,
-        ...(isMicrosoftProvider(provider) && {
+        ...(supportsFolders(provider) && {
           folderName: folderName ?? null,
           folderId,
         }),

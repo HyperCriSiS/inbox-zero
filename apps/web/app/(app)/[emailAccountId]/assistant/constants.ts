@@ -1,5 +1,6 @@
 import {
   TagIcon,
+  EraserIcon,
   MailIcon,
   ReplyIcon,
   SendIcon,
@@ -18,6 +19,7 @@ import { ActionType } from "@/generated/prisma/enums";
 
 export const ACTION_TYPE_TEXT_COLORS = {
   [ActionType.LABEL]: "text-blue-500",
+  [ActionType.REMOVE_LABEL]: "text-blue-400",
   [ActionType.DRAFT_EMAIL]: "text-green-500",
   [ActionType.DRAFT_MESSAGING_CHANNEL]: "text-green-500",
   [ActionType.REPLY]: "text-green-500",
@@ -37,6 +39,7 @@ export const ACTION_TYPE_TEXT_COLORS = {
 
 export const ACTION_TYPE_ICONS = {
   [ActionType.LABEL]: TagIcon,
+  [ActionType.REMOVE_LABEL]: EraserIcon,
   [ActionType.DRAFT_EMAIL]: MailIcon,
   [ActionType.DRAFT_MESSAGING_CHANNEL]: MailIcon,
   [ActionType.REPLY]: ReplyIcon,

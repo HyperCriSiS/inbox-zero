@@ -27,3 +27,19 @@ export const updateBookingLinkBody = z.object({
     .or(z.literal("")),
 });
 export type UpdateBookingLinkBody = z.infer<typeof updateBookingLinkBody>;
+
+export const connectCalDavCalendarBody = z.object({
+  serverUrl: z.string().trim().min(1, "Enter the server URL").max(2048),
+  username: z.string().trim().min(1, "Enter the user name").max(320),
+  password: z.string().min(1, "Enter the password").max(1024),
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email address")
+    .max(320)
+    .optional()
+    .or(z.literal("")),
+});
+export type ConnectCalDavCalendarBody = z.infer<
+  typeof connectCalDavCalendarBody
+>;

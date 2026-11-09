@@ -2,7 +2,7 @@
 import * as Sentry from "@sentry/nextjs";
 import { beforeSend, beforeSendTransaction } from "@/utils/sentry-scrub";
 
-export function register() {
+export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     // this is your Sentry.init call from `sentry.server.config.js|ts`
     Sentry.init({
@@ -17,6 +17,15 @@ export function register() {
       // uncomment the line below to enable Spotlight (https://spotlightjs.com)
       // spotlight: process.env.NODE_ENV === 'development',
     });
+
+    // Self-hosted servers run for a long time, so they can hold IMAP IDLE
+    // connections open and react to new mail without waiting for a poll.
+    if (process.env.IMAP_IDLE_ENABLED === "true") {
+      const { startImapIdleInProcess } = await import(
+        "@/utils/imap/idle-runner"
+      );
+      startImapIdleInProcess();
+    }
   }
 
   // This is your Sentry.init call from `sentry.edge.config.js|ts`

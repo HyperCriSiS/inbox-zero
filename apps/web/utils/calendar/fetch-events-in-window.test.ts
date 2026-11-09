@@ -110,6 +110,10 @@ function connections(count: number) {
     accessToken: "access-token",
     refreshToken: "refresh-token",
     expiresAt: null,
+    email: "calendar@example.com",
+    caldavUrl: null,
+    caldavUsername: null,
+    caldavPassword: null,
   }));
 }
 

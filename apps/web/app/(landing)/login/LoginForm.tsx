@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 import { useState } from "react";
+import { PasswordLoginForm } from "@/app/(landing)/login/PasswordLoginForm";
 import { Button } from "@/components/Button";
+import { env } from "@/env";
 import { Button as UIButton } from "@/components/ui/button";
 import { signIn, signInWithSocialRedirect } from "@/utils/auth-client";
 import {
@@ -109,6 +111,9 @@ export function LoginForm({
 
   return (
     <div className="flex flex-col justify-center gap-2 px-4">
+      {env.NEXT_PUBLIC_AUTH_PASSWORD_ENABLED ? (
+        <PasswordLoginForm callbackURL={callbackURL} />
+      ) : null}
       {showGoogleLogin ? (
         <Button size="2xl" loading={loadingGoogle} onClick={handleGoogleSignIn}>
           <span className="flex items-center justify-center">

@@ -17,7 +17,7 @@ export function hasDesktopMailEngineIpc() {
 }
 
 export function createDesktopIpcMailClient(input?: {
-  provider?: "google" | "microsoft";
+  provider?: "google" | "microsoft" | "imap";
 }) {
   const desktop = getInboxZeroDesktopApp();
   const invoke = desktop?.mailEngine;
@@ -40,7 +40,7 @@ export function createDesktopIpcMailClient(input?: {
 }
 
 export async function startDesktopIpcMailClient(input: {
-  provider: "google" | "microsoft";
+  provider: "google" | "microsoft" | "imap";
   accountId: string;
   publish: (client: MailClient) => Promise<void>;
   onSyncError: (error: unknown) => void;

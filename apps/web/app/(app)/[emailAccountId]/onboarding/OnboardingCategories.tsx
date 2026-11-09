@@ -263,7 +263,7 @@ function CategoryCard({
                   </SelectItem> */}
                 </>
               )}
-              {isGoogleProvider(provider) && (
+              {!isMicrosoftProvider(provider) && (
                 <>
                   <SelectItem value="label">Label</SelectItem>
                   <SelectItem value="label_archive">Label & archive</SelectItem>
