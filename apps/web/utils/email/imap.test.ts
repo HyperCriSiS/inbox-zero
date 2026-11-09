@@ -107,6 +107,53 @@ describe("ImapProvider drafts", () => {
   });
 });
 
+describe("ImapProvider sender actions", () => {
+  it("only moves mail whose From address is exactly the sender", async () => {
+    // IMAP SEARCH FROM is a substring match, so the server returns all four.
+    client.search.mockResolvedValue([1, 2, 3, 4]);
+    mockEnvelopes({
+      1: "bob@example.com",
+      2: "notbob@example.com",
+      3: "someone@other.org",
+      4: "bob@example.com.evil.test",
+    });
+
+    await provider().bulkTrashFromSenders(["Bob@Example.com"], "me", "a");
+
+    expect(client.messageMove).toHaveBeenCalledTimes(1);
+    expect(client.messageMove).toHaveBeenCalledWith("1", "Trash", {
+      uid: true,
+    });
+  });
+
+  it("fails when the server refuses the move", async () => {
+    client.search.mockResolvedValue([1]);
+    mockEnvelopes({ 1: "bob@example.com" });
+    client.messageMove.mockResolvedValue(false);
+
+    await expect(
+      provider().bulkArchiveSenderOrThrow("bob@example.com", "me", "a"),
+    ).rejects.toThrow("IMAP move failed");
+  });
+
+  it("does not count mail from a longer address as received mail", async () => {
+    client.search.mockResolvedValue([1, 2]);
+    mockEnvelopes({ 1: "notbob@example.com", 2: "bob@example.com" });
+
+    expect(await provider().countReceivedMessages("bob@example.com", 5)).toBe(
+      1,
+    );
+  });
+});
+
+function mockEnvelopes(fromByUid: Record<number, string>) {
+  client.fetch.mockImplementation(async function* (range: string) {
+    for (const uid of range.split(",").map(Number)) {
+      yield { uid, envelope: { from: [{ address: fromByUid[uid] }] } };
+    }
+  });
+}
+
 function provider(labelStrategy: ImapAccount["labelStrategy"] = "database") {
   return new ImapProvider(
     {

@@ -76,6 +76,7 @@ import type { ParsedMessage } from "@/utils/types";
 import type { SendEmailBody } from "@/utils/types/mail";
 
 const DEFAULT_PAGE_SIZE = 20;
+const UID_CHUNK = 500;
 
 export class UnsupportedImapOperationError extends Error {
   constructor(operation: string) {
@@ -220,11 +221,17 @@ export class ImapProvider implements EmailProvider {
     before?: Date;
     after?: Date;
   }) {
-    const { senderEmail, ...rest } = options;
-    return this.getMessagesWithPagination({
-      ...rest,
-      query: `from:${senderEmail}`,
+    const { rows, nextPageToken } = await this.searchMailbox({
+      mailbox: await this.requireMailbox("inbox"),
+      criteria: {
+        ...(options.before && { before: options.before }),
+        ...(options.after && { since: options.after }),
+      },
+      sender: options.senderEmail,
+      maxResults: options.maxResults,
+      pageToken: options.pageToken,
     });
+    return { messages: await this.readRows(rows), nextPageToken };
   }
 
   async getMessagesWithAttachments(options: {
@@ -458,11 +465,11 @@ export class ImapProvider implements EmailProvider {
   }
 
   async checkIfReplySent(senderEmail: string) {
-    return (await this.countInRole("sent", { to: senderEmail }, 1)) > 0;
+    return (await this.countInRole("sent", "to", senderEmail, 1)) > 0;
   }
 
   async countReceivedMessages(senderEmail: string, threshold: number) {
-    return this.countInRole("inbox", { from: senderEmail }, threshold);
+    return this.countInRole("inbox", "from", senderEmail, threshold);
   }
 
   async hasPreviousCommunicationsWithSenderOrDomain(options: {
@@ -471,19 +478,10 @@ export class ImapProvider implements EmailProvider {
     messageId: string;
   }) {
     const address = extractEmailAddress(options.from);
-    const sent = await this.countInRole(
-      "sent",
-      { to: address, before: options.date },
-      1,
-    );
+    const before = { before: options.date };
+    const sent = await this.countInRole("sent", "to", address, 1, before);
     if (sent > 0) return true;
-    return (
-      (await this.countInRole(
-        "inbox",
-        { from: address, before: options.date },
-        1,
-      )) > 0
-    );
+    return (await this.countInRole("inbox", "from", address, 1, before)) > 0;
   }
 
   async countMessages(options: { folderId?: string; labelId?: string }) {
@@ -1535,18 +1533,28 @@ export class ImapProvider implements EmailProvider {
   private async searchMailbox({
     mailbox,
     criteria,
+    sender,
     maxResults = DEFAULT_PAGE_SIZE,
     pageToken,
   }: {
     mailbox: { id: string; path: string };
     criteria: SearchObject;
+    sender?: string;
     maxResults?: number;
     pageToken?: string;
   }) {
     const offset = pageToken ? Number(pageToken) : 0;
 
     return this.withClient(async (client) => {
-      const uids = await searchUids(client, mailbox.path, criteria);
+      const uids = sender
+        ? await searchUidsByAddress(
+            client,
+            mailbox.path,
+            "from",
+            sender,
+            criteria,
+          )
+        : await searchUids(client, mailbox.path, criteria);
       const newestFirst = uids.toReversed();
       const page = newestFirst.slice(offset, offset + maxResults);
       const rows = await ensureIndexed({
@@ -1707,13 +1715,21 @@ export class ImapProvider implements EmailProvider {
 
   private async countInRole(
     role: ImapMailboxRole,
-    criteria: SearchObject,
+    field: "from" | "to",
+    address: string,
     limit: number,
+    criteria?: SearchObject,
   ) {
     const mailbox = await this.findMailbox(role);
     if (!mailbox) return 0;
     return this.withClient(async (client) => {
-      const uids = await searchUids(client, mailbox.path, criteria);
+      const uids = await searchUidsByAddress(
+        client,
+        mailbox.path,
+        field,
+        address,
+        criteria,
+      );
       return Math.min(uids.length, limit);
     });
   }
@@ -1722,13 +1738,25 @@ export class ImapProvider implements EmailProvider {
     const inbox = await this.requireMailbox("inbox");
     const target = await this.requireMailboxOrCreate(role);
     return this.withClient(async (client) => {
-      const uids = await searchUids(client, inbox.path, { from: fromEmail });
+      const uids = await searchUidsByAddress(
+        client,
+        inbox.path,
+        "from",
+        fromEmail,
+      );
       if (!uids.length) return 0;
 
       const lock = await client.getMailboxLock(inbox.path);
       try {
-        // The sync moves the matching rows, so their app IDs stay valid.
-        await client.messageMove(uids.join(","), target.path, { uid: true });
+        for (let start = 0; start < uids.length; start += UID_CHUNK) {
+          // The sync moves the matching rows, so their app IDs stay valid.
+          const moved = await client.messageMove(
+            uids.slice(start, start + UID_CHUNK).join(","),
+            target.path,
+            { uid: true },
+          );
+          if (!moved) throw new Error("IMAP move failed");
+        }
       } finally {
         lock.release();
       }
@@ -2192,6 +2220,43 @@ async function searchUids(
     const uids = await client.search(query, { uid: true });
     if (!Array.isArray(uids)) throw new Error("IMAP search failed");
     return uids;
+  } finally {
+    lock.release();
+  }
+}
+
+// IMAP SEARCH FROM/TO matches substrings and display names, so a search for
+// bob@example.com also returns notbob@example.com. The envelope decides.
+async function searchUidsByAddress(
+  client: ImapFlow,
+  path: string,
+  field: "from" | "to",
+  address: string,
+  criteria: SearchObject = {},
+): Promise<number[]> {
+  const wanted = normalizeAddress(address);
+  const lock = await client.getMailboxLock(path, { readOnly: true });
+  try {
+    const uids = await client.search(
+      { ...criteria, [field]: wanted },
+      { uid: true },
+    );
+    if (!Array.isArray(uids)) throw new Error("IMAP search failed");
+
+    const exact: number[] = [];
+    for (let start = 0; start < uids.length; start += UID_CHUNK) {
+      for await (const message of client.fetch(
+        uids.slice(start, start + UID_CHUNK).join(","),
+        { uid: true, envelope: true },
+        { uid: true },
+      )) {
+        const addresses = message.envelope?.[field] ?? [];
+        if (addresses.some((item) => item.address?.toLowerCase() === wanted)) {
+          exact.push(message.uid);
+        }
+      }
+    }
+    return exact;
   } finally {
     lock.release();
   }
