@@ -79,8 +79,42 @@ export const linkImapAccountAction = actionClientUser
     };
 
     if (existing) {
+      const previous = await prisma.imapConnection.findUniqueOrThrow({
+        where: { emailAccountId },
+        select: { id: true, imapHost: true, username: true },
+      });
       // Sync state stays, so a new password does not reprocess the mailbox.
+      // Another server or login is another mailbox, where the indexed UIDs
+      // would address unrelated mail.
+      const sameMailbox =
+        previous.imapHost.toLowerCase() === input.imapHost.toLowerCase() &&
+        previous.username === input.username;
+      const dropped = sameMailbox
+        ? []
+        : await prisma.imapMessage.findMany({
+            where: { connectionId: previous.id },
+            select: { id: true },
+          });
+
       await prisma.$transaction([
+        ...(sameMailbox
+          ? []
+          : [
+              prisma.imapMailbox.deleteMany({
+                where: { connectionId: previous.id },
+              }),
+              prisma.imapSyncItem.deleteMany({
+                where: { connectionId: previous.id },
+              }),
+              // The local mail client learns of removals from this feed.
+              prisma.imapChange.createMany({
+                data: dropped.map(({ id }) => ({
+                  connectionId: previous.id,
+                  messageId: id,
+                  kind: "delete",
+                })),
+              }),
+            ]),
         prisma.imapConnection.update({
           where: { emailAccountId },
           data: { ...settings, lastSyncError: null },

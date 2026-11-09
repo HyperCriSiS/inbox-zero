@@ -146,6 +146,93 @@ describe("ImapProvider sender actions", () => {
   });
 });
 
+describe("ImapProvider thread actions", () => {
+  const thread = () =>
+    mockRows([
+      row("received", "inbox", 1),
+      row("reply", "sent", 2),
+      row("draft", "drafts", 3),
+      row("old", "trash", 4),
+    ]);
+
+  it("archives only what is in the inbox", async () => {
+    thread();
+
+    await provider().archiveThread("thread-1", "me@example.com");
+
+    expect(moves()).toEqual([["INBOX", "1", "Archive"]]);
+  });
+
+  it("trashes a thread without its sent copies and drafts", async () => {
+    thread();
+
+    await provider().trashThread("thread-1", "me@example.com", "user");
+
+    expect(moves()).toEqual([["INBOX", "1", "Trash"]]);
+  });
+
+  it("restores only what is in the trash", async () => {
+    thread();
+
+    await provider().untrashThread("thread-1");
+
+    expect(moves()).toEqual([["Trash", "4", "INBOX"]]);
+  });
+});
+
+describe("ImapProvider writes", () => {
+  it("refuses to act when the folder's UIDs were reassigned", async () => {
+    mockRows([row("m1", "inbox", 1)]);
+    client.getMailboxLock.mockImplementation(async (path: string) => {
+      client.mailbox = { path, uidValidity: UID_VALIDITY + BigInt(1) };
+      return { release: vi.fn() };
+    });
+
+    await expect(provider().trashMessages(["m1"])).rejects.toThrow(
+      "changed on the mail server",
+    );
+    expect(client.messageMove).not.toHaveBeenCalled();
+  });
+
+  it("refuses to act on a row the sync has not relinked yet", async () => {
+    mockRows([{ ...row("m1", "inbox", 1), uidValidity: BigInt(1) }]);
+
+    await expect(
+      provider().markMessagesReadState(["m1"], true),
+    ).rejects.toThrow("changed on the mail server");
+    expect(client.messageFlagsAdd).not.toHaveBeenCalled();
+  });
+
+  it("fails when the server does not store a flag", async () => {
+    mockRows([row("m1", "inbox", 1)]);
+    client.messageFlagsAdd.mockResolvedValue(false);
+
+    await expect(
+      provider().markMessagesReadState(["m1"], true),
+    ).rejects.toThrow("IMAP flag change failed");
+  });
+
+  it("does not expunge other clients' deletions on servers without UIDPLUS", async () => {
+    mockRows([row("d1", "drafts", 3)]);
+    client.capabilities = new Map();
+    client.search.mockResolvedValue([8]);
+
+    await expect(provider().deleteDraft("d1")).rejects.toThrow(
+      "marked for deletion",
+    );
+    expect(client.messageDelete).not.toHaveBeenCalled();
+    expect(prisma.imapMessage.delete).not.toHaveBeenCalled();
+  });
+});
+
+function moves() {
+  return client.messageMove.mock.calls.map(([uids, target], index) => [
+    client.getMailboxLock.mock.calls[index][0],
+    uids,
+    target,
+  ]);
+}
+
 function mockEnvelopes(fromByUid: Record<number, string>) {
   client.fetch.mockImplementation(async function* (range: string) {
     for (const uid of range.split(",").map(Number)) {

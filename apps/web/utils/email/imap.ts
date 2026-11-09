@@ -32,7 +32,7 @@ import {
 import { searchImapContacts } from "@/utils/imap/contacts";
 import type { SendAsAddress } from "@/utils/email/send-as";
 import { extractEmailAddress } from "@/utils/email";
-import { DraftNotFoundError } from "@/utils/error";
+import { DraftNotFoundError, SafeError } from "@/utils/error";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import {
   type ImapAccount,
@@ -518,7 +518,11 @@ export class ImapProvider implements EmailProvider {
   // --- Actions ---
 
   async archiveThread(threadId: string, _ownerEmail: string) {
-    await this.moveToRole(await this.findThreadRows(threadId), "archive");
+    const rows = await this.findThreadRows(threadId);
+    await this.moveToRole(
+      rows.filter((row) => row.mailbox.role === "inbox"),
+      "archive",
+    );
   }
 
   async archiveThreadWithLabel(
@@ -541,7 +545,10 @@ export class ImapProvider implements EmailProvider {
   }
 
   async unarchiveThread(threadId: string) {
-    await this.moveToRole(await this.findThreadRows(threadId), "inbox");
+    await this.moveToRole(
+      await this.findMovableThreadRows(threadId, ["trash", "junk"]),
+      "inbox",
+    );
   }
 
   async unarchiveMessages(messageIds: string[]) {
@@ -556,7 +563,7 @@ export class ImapProvider implements EmailProvider {
     _ownerEmail: string,
     _actionSource: "user" | "automation",
   ) {
-    await this.moveToRole(await this.findThreadRows(threadId), "trash");
+    await this.moveToRole(await this.findMovableThreadRows(threadId), "trash");
   }
 
   async trashMessages(messageIds: string[]) {
@@ -567,7 +574,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   async untrashThread(threadId: string) {
-    await this.unarchiveThread(threadId);
+    await this.restoreThread(threadId, "trash");
   }
 
   async untrashMessages(messageIds: string[]) {
@@ -575,11 +582,14 @@ export class ImapProvider implements EmailProvider {
   }
 
   async markSpam(threadId: string) {
-    await this.moveToRole(await this.findThreadRows(threadId), "junk");
+    await this.moveToRole(
+      await this.findMovableThreadRows(threadId, ["trash"]),
+      "junk",
+    );
   }
 
   async markNotSpam(threadId: string) {
-    await this.unarchiveThread(threadId);
+    await this.restoreThread(threadId, "junk");
   }
 
   async blockUnsubscribedEmail(messageId: string) {
@@ -592,7 +602,7 @@ export class ImapProvider implements EmailProvider {
     folderName: string,
   ) {
     const path = await this.getOrCreateFolderIdByName(folderName);
-    await this.moveRows(await this.findThreadRows(threadId), path);
+    await this.moveRows(await this.findMovableThreadRows(threadId), path);
   }
 
   async moveMessagesToFolder(messageIds: string[], folderId: string) {
@@ -1091,9 +1101,9 @@ export class ImapProvider implements EmailProvider {
     if (row?.mailbox.role !== "drafts") return false;
 
     await this.withClient(async (client) => {
-      const lock = await client.getMailboxLock(row.mailbox.path);
+      const lock = await lockRow(client, row);
       try {
-        await client.messageDelete(String(row.uid), { uid: true });
+        await deleteUids(client, String(row.uid));
       } finally {
         lock.release();
       }
@@ -1420,6 +1430,25 @@ export class ImapProvider implements EmailProvider {
     return rows.filter((row) => !isLabelFolder(row.mailbox.path));
   }
 
+  // The folder is what marks a message as sent or as a draft, so thread moves
+  // leave those where they are.
+  private async findMovableThreadRows(
+    threadId: string,
+    alsoKeep: ImapMailboxRole[] = [],
+  ) {
+    const keep: (string | null)[] = ["sent", "drafts", ...alsoKeep];
+    const rows = await this.findThreadRows(threadId);
+    return rows.filter((row) => !keep.includes(row.mailbox.role));
+  }
+
+  private async restoreThread(threadId: string, from: ImapMailboxRole) {
+    const rows = await this.findThreadRows(threadId);
+    await this.moveToRole(
+      rows.filter((row) => row.mailbox.role === from),
+      "inbox",
+    );
+  }
+
   private async readThread(threadId: string, includeDrafts?: boolean) {
     const rows = await this.findThreadRows(threadId);
     const visible = includeDrafts
@@ -1435,8 +1464,8 @@ export class ImapProvider implements EmailProvider {
     const messages = await this.withClient(async (client) => {
       const parsed: ParsedMessage[] = [];
 
-      for (const group of groupByMailbox(rows)) {
-        const lock = await client.getMailboxLock(group.path, {
+      for (const group of groupByMailbox(rows, "skip")) {
+        const lock = await lockIndexedMailbox(client, group, {
           readOnly: true,
         });
         try {
@@ -1750,12 +1779,11 @@ export class ImapProvider implements EmailProvider {
       try {
         for (let start = 0; start < uids.length; start += UID_CHUNK) {
           // The sync moves the matching rows, so their app IDs stay valid.
-          const moved = await client.messageMove(
+          await moveUids(
+            client,
             uids.slice(start, start + UID_CHUNK).join(","),
             target.path,
-            { uid: true },
           );
-          if (!moved) throw new Error("IMAP move failed");
         }
       } finally {
         lock.release();
@@ -1765,6 +1793,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   private async moveToRole(rows: MessageRow[], role: ImapMailboxRole) {
+    if (!rows.length) return;
     const target = await this.requireMailboxOrCreate(role);
     await this.moveRows(rows, target.path);
   }
@@ -1774,17 +1803,17 @@ export class ImapProvider implements EmailProvider {
     if (!toMove.length) return;
 
     const { connectionId } = this.account;
+    const groups = groupByMailbox(toMove);
 
     await this.withClient(async (client) => {
-      for (const group of groupByMailbox(toMove)) {
-        const lock = await client.getMailboxLock(group.path);
+      for (const group of groups) {
+        const lock = await lockIndexedMailbox(client, group);
         try {
-          const result = await client.messageMove(
+          const result = await moveUids(
+            client,
             group.rows.map((row) => row.uid).join(","),
             targetPath,
-            { uid: true },
           );
-          if (!result) throw new Error("IMAP move failed");
 
           // Without COPYUID the next sync re-links the rows by Message-ID.
           if (result.uidMap && result.uidValidity) {
@@ -1827,16 +1856,17 @@ export class ImapProvider implements EmailProvider {
   }
 
   private async setFlag(rows: MessageRow[], flag: string, enabled: boolean) {
+    const groups = groupByMailbox(rows);
+    if (!groups.length) return;
     await this.withClient(async (client) => {
-      for (const group of groupByMailbox(rows)) {
-        const lock = await client.getMailboxLock(group.path);
+      for (const group of groups) {
+        const lock = await lockIndexedMailbox(client, group);
         try {
           const uids = group.rows.map((row) => row.uid).join(",");
-          if (enabled) {
-            await client.messageFlagsAdd(uids, [flag], { uid: true });
-          } else {
-            await client.messageFlagsRemove(uids, [flag], { uid: true });
-          }
+          const stored = enabled
+            ? await client.messageFlagsAdd(uids, [flag], { uid: true })
+            : await client.messageFlagsRemove(uids, [flag], { uid: true });
+          if (!stored) throw new Error("IMAP flag change failed");
         } finally {
           lock.release();
         }
@@ -1853,22 +1883,26 @@ export class ImapProvider implements EmailProvider {
       case "keywords":
         await this.setFlag(rows, labelToKeyword(labelId), true);
         return;
-      case "folders":
+      case "folders": {
+        const groups = groupByMailbox(rows);
+        if (!groups.length) return;
         await this.withClient(async (client) => {
-          for (const group of groupByMailbox(rows)) {
-            const lock = await client.getMailboxLock(group.path);
+          for (const group of groups) {
+            const lock = await lockIndexedMailbox(client, group);
             try {
-              await client.messageCopy(
+              const copied = await client.messageCopy(
                 group.rows.map((row) => row.uid).join(","),
                 labelId,
                 { uid: true },
               );
+              if (!copied) throw new Error("IMAP copy failed");
             } finally {
               lock.release();
             }
           }
         });
         return;
+      }
       default:
         await prisma.$transaction(
           rows
@@ -1899,13 +1933,15 @@ export class ImapProvider implements EmailProvider {
           },
           include: messageRowInclude,
         });
+        const groups = groupByMailbox(copies);
+        if (!groups.length) return;
         await this.withClient(async (client) => {
-          for (const group of groupByMailbox(copies)) {
-            const lock = await client.getMailboxLock(group.path);
+          for (const group of groups) {
+            const lock = await lockIndexedMailbox(client, group);
             try {
-              await client.messageDelete(
+              await deleteUids(
+                client,
                 group.rows.map((row) => row.uid).join(","),
-                { uid: true },
               );
             } finally {
               lock.release();
@@ -2064,9 +2100,9 @@ export class ImapProvider implements EmailProvider {
         messageId,
         row.uid,
       );
-      const lock = await client.getMailboxLock(row.mailbox.path);
+      const lock = await lockRow(client, row);
       try {
-        await client.messageDelete(String(row.uid), { uid: true });
+        await deleteUids(client, String(row.uid));
       } finally {
         lock.release();
       }
@@ -2194,19 +2230,84 @@ function sortChronologically(messages: ParsedMessage[]) {
   );
 }
 
-// Stale UIDVALIDITY rows point at nothing valid until the next sync relinks them.
-function groupByMailbox(rows: MessageRow[]) {
-  const groups = new Map<string, { path: string; rows: MessageRow[] }>();
+// Stale UIDVALIDITY rows point at nothing valid until the next sync relinks
+// them. Reads leave them out. A write fails, so it never reports success for
+// mail it did not touch.
+function groupByMailbox(rows: MessageRow[], stale: "fail" | "skip" = "fail") {
+  const groups = new Map<
+    string,
+    { path: string; uidValidity: bigint; rows: MessageRow[] }
+  >();
   for (const row of rows) {
-    if (row.uidValidity !== row.mailbox.uidValidity) continue;
+    if (row.uidValidity !== row.mailbox.uidValidity) {
+      if (stale === "fail") throw staleIndexError();
+      continue;
+    }
     const group = groups.get(row.mailboxId) ?? {
       path: row.mailbox.path,
+      uidValidity: row.mailbox.uidValidity,
       rows: [],
     };
     group.rows.push(row);
     groups.set(row.mailboxId, group);
   }
   return [...groups.values()];
+}
+
+function staleIndexError() {
+  return new SafeError(
+    "This folder changed on the mail server. Try again in a minute.",
+  );
+}
+
+// The index can lag behind the server. A folder whose UIDVALIDITY changed has
+// handed out its UIDs again, so a stored UID would address some other message.
+async function lockIndexedMailbox(
+  client: ImapFlow,
+  mailbox: { path: string; uidValidity: bigint },
+  options?: { readOnly?: boolean },
+) {
+  const lock = await client.getMailboxLock(mailbox.path, options);
+  if (client.mailbox && client.mailbox.uidValidity === mailbox.uidValidity) {
+    return lock;
+  }
+  lock.release();
+  throw staleIndexError();
+}
+
+async function lockRow(
+  client: ImapFlow,
+  row: MessageRow,
+  options?: { readOnly?: boolean },
+) {
+  if (row.uidValidity !== row.mailbox.uidValidity) throw staleIndexError();
+  return lockIndexedMailbox(client, row.mailbox, options);
+}
+
+async function deleteUids(client: ImapFlow, uids: string) {
+  await assertExpungeIsScoped(client);
+  const deleted = await client.messageDelete(uids, { uid: true });
+  if (!deleted) throw new Error("IMAP delete failed");
+}
+
+async function moveUids(client: ImapFlow, uids: string, targetPath: string) {
+  // Without MOVE the library copies, then deletes and expunges the source.
+  if (!client.capabilities.has("MOVE")) await assertExpungeIsScoped(client);
+  const result = await client.messageMove(uids, targetPath, { uid: true });
+  if (!result) throw new Error("IMAP move failed");
+  return result;
+}
+
+// Without UIDPLUS, EXPUNGE removes every message flagged \Deleted in the
+// folder, including mail another client only marked for deletion.
+async function assertExpungeIsScoped(client: ImapFlow) {
+  if (client.capabilities.has("UIDPLUS")) return;
+  const flagged = await client.search({ deleted: true }, { uid: true });
+  if (Array.isArray(flagged) && flagged.length) {
+    throw new SafeError(
+      "This mail server cannot remove a single message while other mail in the folder is marked for deletion. Empty or restore that mail in your mail app first.",
+    );
+  }
 }
 
 async function searchUids(
@@ -2263,9 +2364,7 @@ async function searchUidsByAddress(
 }
 
 async function readSource(client: ImapFlow, row: MessageRow) {
-  const lock = await client.getMailboxLock(row.mailbox.path, {
-    readOnly: true,
-  });
+  const lock = await lockRow(client, row, { readOnly: true });
   try {
     const message = await client.fetchOne(
       String(row.uid),
