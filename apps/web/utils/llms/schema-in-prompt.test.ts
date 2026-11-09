@@ -1,4 +1,4 @@
-import { APICallError, RetryError, TypeValidationError } from "ai";
+import { APICallError, jsonSchema, RetryError, TypeValidationError } from "ai";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -102,6 +102,12 @@ describe("validateAgainstSchema", () => {
     await expect(validateAgainstSchema(schema, {})).resolves.toEqual({
       count: 1,
     });
+  });
+
+  it("refuses a schema that cannot validate the answer", async () => {
+    await expect(
+      validateAgainstSchema(jsonSchema({ type: "object" }), { any: "thing" }),
+    ).rejects.toSatisfy((error) => TypeValidationError.isInstance(error));
   });
 
   it("throws a type validation error on a mismatch", async () => {

@@ -1,8 +1,27 @@
 import { z } from "zod";
 import { LabelCleanupAction } from "@/generated/prisma/enums";
 
+const SYSTEM_LABEL_IDS = new Set([
+  "INBOX",
+  "SENT",
+  "DRAFT",
+  "SPAM",
+  "TRASH",
+  "STARRED",
+  "IMPORTANT",
+  "UNREAD",
+  "CHAT",
+]);
+
 export const saveLabelCleanupBody = z.object({
-  labelId: z.string().trim().min(1, "Choose a label"),
+  labelId: z
+    .string()
+    .trim()
+    .min(1, "Choose a label")
+    // Gmail system labels would sweep the inbox, sent mail or drafts.
+    .refine((id) => !SYSTEM_LABEL_IDS.has(id.toUpperCase()), {
+      message: "Choose one of your own labels",
+    }),
   labelName: z.string().trim().min(1).max(255),
   afterDays: z.coerce
     .number()

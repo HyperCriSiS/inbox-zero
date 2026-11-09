@@ -99,7 +99,13 @@ export async function validateAgainstSchema<RESULT>(
   value: unknown,
 ): Promise<RESULT> {
   const resolved = asSchema(schema);
-  if (!resolved.validate) return value as RESULT;
+  // Without a validator the answer would go through unchecked.
+  if (!resolved.validate) {
+    throw new TypeValidationError({
+      value,
+      cause: new Error("The schema cannot validate the answer"),
+    });
+  }
 
   const result = await resolved.validate(value);
   if (!result.success) {

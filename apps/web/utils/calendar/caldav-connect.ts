@@ -97,6 +97,7 @@ export async function connectCalDavCalendar({
           name: calendar.name,
           description: calendar.description,
           timezone: calendar.timezone,
+          isReadOnly: calendar.isReadOnly,
         },
       }),
     ),
