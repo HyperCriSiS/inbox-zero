@@ -344,6 +344,8 @@ export function isAiQuotaExceededError(error: RetryError): boolean {
 }
 
 export function isOutlookThrottlingError(error: unknown): boolean {
+  // Our own 429s (e.g. a Gmail rate limit) already carry the right message.
+  if (error instanceof SafeError) return false;
   const err = error as Record<string, unknown>;
   const code = err?.code as string | undefined;
   const statusCode = err?.statusCode as number | undefined;
@@ -451,6 +453,7 @@ export function isKnownApiError(error: unknown): boolean {
     isGmailInsufficientPermissionsError(error) ||
     isGmailRateLimitExceededError(error) ||
     isGmailQuotaExceededError(error) ||
+    isGmailServiceUnavailableError(error) ||
     isKnownOutlookError(error) ||
     isContentFilterRefusal(error) ||
     (APICallError.isInstance(error) &&
@@ -488,6 +491,15 @@ export function checkCommonErrors(
       type: "Gmail Insufficient Permissions",
       message:
         "You must grant all Gmail permissions to use the app. Please log out and log in again to grant permissions.",
+      code: 403,
+    };
+  }
+
+  if (isGmailServiceUnavailableError(error)) {
+    logger.warn("Gmail not enabled for account for url", { url });
+    return {
+      type: "Gmail Service Unavailable",
+      message: GMAIL_SERVICE_UNAVAILABLE_MESSAGE,
       code: 403,
     };
   }
