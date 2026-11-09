@@ -9,11 +9,15 @@ export type ImapFeatures = {
 };
 
 const LABEL_FOLDER_ROOT = /^labels$/i;
+const CUSTOM_FOLDER_ROOT = /^folders$/i;
 
 /**
  * Decided from what the server reports, never from its name, because the same
  * vendor can change backends. Proton Mail Bridge is covered by its `Labels`
- * folder: copying a message there is how it applies a label.
+ * folder: copying a message there is how it applies a label. It always lists
+ * `Folders` next to it. Requiring both keeps an ordinary server, where a user
+ * files real mail under a folder called Labels, from being treated like it:
+ * removing a label deletes the copy in that folder.
  */
 export function detectFeatures({
   capabilities,
@@ -43,7 +47,10 @@ function detectLabelStrategy(
 ): ImapLabelStrategy {
   // `\*` in PERMANENTFLAGS means clients may create new keywords.
   if (permanentFlags && [...permanentFlags].includes("\\*")) return "keywords";
-  if (folderPaths.some((path) => LABEL_FOLDER_ROOT.test(path))) {
+  if (
+    folderPaths.some((path) => LABEL_FOLDER_ROOT.test(path)) &&
+    folderPaths.some((path) => CUSTOM_FOLDER_ROOT.test(path))
+  ) {
     return "folders";
   }
   return "database";

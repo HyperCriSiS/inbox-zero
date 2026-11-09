@@ -31,7 +31,7 @@ import {
 } from "@/utils/email/contact";
 import { searchImapContacts } from "@/utils/imap/contacts";
 import type { SendAsAddress } from "@/utils/email/send-as";
-import { extractEmailAddress } from "@/utils/email";
+import { extractEmailAddress, getSearchTermForSender } from "@/utils/email";
 import { DraftNotFoundError, SafeError } from "@/utils/error";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import {
@@ -465,11 +465,12 @@ export class ImapProvider implements EmailProvider {
   }
 
   async checkIfReplySent(senderEmail: string) {
-    return (await this.countInRole("sent", "to", senderEmail, 1)) > 0;
+    return (await this.findInRole("sent", "to", senderEmail)).length > 0;
   }
 
   async countReceivedMessages(senderEmail: string, threshold: number) {
-    return this.countInRole("inbox", "from", senderEmail, threshold);
+    const uids = await this.findInRole("inbox", "from", senderEmail);
+    return Math.min(uids.length, threshold);
   }
 
   async hasPreviousCommunicationsWithSenderOrDomain(options: {
@@ -477,11 +478,24 @@ export class ImapProvider implements EmailProvider {
     date: Date;
     messageId: string;
   }) {
-    const address = extractEmailAddress(options.from);
+    // A company domain counts as a whole, as it does for Gmail and Outlook.
+    const sender = getSearchTermForSender(options.from);
     const before = { before: options.date };
-    const sent = await this.countInRole("sent", "to", address, 1, before);
-    if (sent > 0) return true;
-    return (await this.countInRole("inbox", "from", address, 1, before)) > 0;
+    if ((await this.findInRole("sent", "to", sender, before)).length) {
+      return true;
+    }
+
+    // Servers without WITHIN compare dates only, so the search also returns
+    // the message being checked.
+    const [own] = await this.findRows({ id: options.messageId });
+    for (const role of ["inbox", "archive"] as const) {
+      const uids = await this.findInRole(role, "from", sender, before);
+      const others = uids.filter(
+        (uid) => own?.mailbox.role !== role || BigInt(uid) !== own.uid,
+      );
+      if (others.length) return true;
+    }
+    return false;
   }
 
   async countMessages(options: { folderId?: string; labelId?: string }) {
@@ -761,6 +775,7 @@ export class ImapProvider implements EmailProvider {
 
   async deleteLabel(labelId: string) {
     if (this.account.labelStrategy === "folders") {
+      assertLabelFolder(labelId);
       await this.withClient((client) => client.mailboxDelete(labelId));
       return;
     }
@@ -780,6 +795,7 @@ export class ImapProvider implements EmailProvider {
     if (this.account.labelStrategy !== "folders") {
       throw new UnsupportedImapOperationError("Renaming a label");
     }
+    assertLabelFolder(labelId);
     await this.withClient((client) =>
       client.mailboxRename(
         labelId,
@@ -886,7 +902,33 @@ export class ImapProvider implements EmailProvider {
   }
 
   async deleteFolder(folderId: string) {
-    await this.withClient((client) => client.mailboxDelete(folderId));
+    const mailbox = await prisma.imapMailbox.findUnique({
+      where: {
+        connectionId_path: {
+          connectionId: this.account.connectionId,
+          path: folderId,
+        },
+      },
+      select: { role: true },
+    });
+    if (mailbox?.role || isLabelFolder(folderId)) {
+      throw new SafeError("This folder cannot be deleted.");
+    }
+    const trash = await this.requireMailbox("trash");
+
+    await this.withClient(async (client) => {
+      // Deleting a folder destroys its mail on the server, so the mail goes
+      // to the trash first, where it can still be restored.
+      const lock = await client.getMailboxLock(folderId);
+      try {
+        if (client.mailbox && client.mailbox.exists > 0) {
+          await moveUids(client, "1:*", trash.path);
+        }
+      } finally {
+        lock.release();
+      }
+      await client.mailboxDelete(folderId);
+    });
   }
 
   // --- Sending ---
@@ -1575,7 +1617,7 @@ export class ImapProvider implements EmailProvider {
     const offset = pageToken ? Number(pageToken) : 0;
 
     return this.withClient(async (client) => {
-      const uids = sender
+      let uids = sender
         ? await searchUidsByAddress(
             client,
             mailbox.path,
@@ -1584,6 +1626,15 @@ export class ImapProvider implements EmailProvider {
             criteria,
           )
         : await searchUids(client, mailbox.path, criteria);
+      if (criteria.before instanceof Date) {
+        uids = await dropNotBefore(
+          client,
+          mailbox.path,
+          uids,
+          criteria,
+          criteria.before,
+        );
+      }
       const newestFirst = uids.toReversed();
       const page = newestFirst.slice(offset, offset + maxResults);
       const rows = await ensureIndexed({
@@ -1742,25 +1793,17 @@ export class ImapProvider implements EmailProvider {
     });
   }
 
-  private async countInRole(
+  private async findInRole(
     role: ImapMailboxRole,
     field: "from" | "to",
     address: string,
-    limit: number,
     criteria?: SearchObject,
   ) {
     const mailbox = await this.findMailbox(role);
-    if (!mailbox) return 0;
-    return this.withClient(async (client) => {
-      const uids = await searchUidsByAddress(
-        client,
-        mailbox.path,
-        field,
-        address,
-        criteria,
-      );
-      return Math.min(uids.length, limit);
-    });
+    if (!mailbox) return [];
+    return this.withClient((client) =>
+      searchUidsByAddress(client, mailbox.path, field, address, criteria),
+    );
   }
 
   private async moveFromSender(fromEmail: string, role: ImapMailboxRole) {
@@ -1884,6 +1927,7 @@ export class ImapProvider implements EmailProvider {
         await this.setFlag(rows, labelToKeyword(labelId), true);
         return;
       case "folders": {
+        assertLabelFolder(labelId);
         const groups = groupByMailbox(rows);
         if (!groups.length) return;
         await this.withClient(async (client) => {
@@ -1923,6 +1967,9 @@ export class ImapProvider implements EmailProvider {
         await this.setFlag(rows, labelToKeyword(labelId), false);
         return;
       case "folders": {
+        // The copies below are deleted, which is only safe inside `Labels`,
+        // where a message is a copy of mail that lives elsewhere.
+        assertLabelFolder(labelId);
         const copies = await prisma.imapMessage.findMany({
           where: {
             connectionId: this.account.connectionId,
@@ -2254,6 +2301,10 @@ function groupByMailbox(rows: MessageRow[], stale: "fail" | "skip" = "fail") {
   return [...groups.values()];
 }
 
+function assertLabelFolder(path: string) {
+  if (!isLabelFolder(path)) throw new SafeError("This is not a label.");
+}
+
 function staleIndexError() {
   return new SafeError(
     "This folder changed on the mail server. Try again in a minute.",
@@ -2326,8 +2377,46 @@ async function searchUids(
   }
 }
 
+// Without WITHIN, SEARCH BEFORE compares dates only and also returns mail from
+// later on that day. A caller that pages back by time would get the same mail
+// again, filter it out, and take the empty page for the end.
+async function dropNotBefore(
+  client: ImapFlow,
+  path: string,
+  uids: number[],
+  criteria: SearchObject,
+  before: Date,
+) {
+  if (client.capabilities.has("WITHIN") || !uids.length) return uids;
+
+  const sameDay = new Set(
+    await searchUids(client, path, { ...criteria, since: before }),
+  );
+  const candidates = uids.filter((uid) => sameDay.has(uid));
+  if (!candidates.length) return uids;
+
+  const late = new Set<number>();
+  const lock = await client.getMailboxLock(path, { readOnly: true });
+  try {
+    for (let start = 0; start < candidates.length; start += UID_CHUNK) {
+      for await (const message of client.fetch(
+        candidates.slice(start, start + UID_CHUNK).join(","),
+        { uid: true, internalDate: true },
+        { uid: true },
+      )) {
+        const date = message.internalDate && new Date(message.internalDate);
+        if (date && date >= before) late.add(message.uid);
+      }
+    }
+  } finally {
+    lock.release();
+  }
+  return uids.filter((uid) => !late.has(uid));
+}
+
 // IMAP SEARCH FROM/TO matches substrings and display names, so a search for
 // bob@example.com also returns notbob@example.com. The envelope decides.
+// A bare domain matches every address at that domain.
 async function searchUidsByAddress(
   client: ImapFlow,
   path: string,
@@ -2335,7 +2424,12 @@ async function searchUidsByAddress(
   address: string,
   criteria: SearchObject = {},
 ): Promise<number[]> {
-  const wanted = normalizeAddress(address);
+  const wanted = (extractEmailAddress(address) || address).toLowerCase();
+  const matches = (candidate: string | undefined) =>
+    !!candidate &&
+    (wanted.includes("@")
+      ? candidate.toLowerCase() === wanted
+      : candidate.toLowerCase().endsWith(`@${wanted}`));
   const lock = await client.getMailboxLock(path, { readOnly: true });
   try {
     const uids = await client.search(
@@ -2352,7 +2446,7 @@ async function searchUidsByAddress(
         { uid: true },
       )) {
         const addresses = message.envelope?.[field] ?? [];
-        if (addresses.some((item) => item.address?.toLowerCase() === wanted)) {
+        if (addresses.some((item) => matches(item.address))) {
           exact.push(message.uid);
         }
       }

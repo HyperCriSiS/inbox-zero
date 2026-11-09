@@ -225,6 +225,101 @@ describe("ImapProvider writes", () => {
   });
 });
 
+describe("ImapProvider labels and folders", () => {
+  it("refuses to delete a folder that is not a label folder as a label", async () => {
+    await expect(
+      provider("folders").deleteLabel("Projects/Taxes"),
+    ).rejects.toThrow("not a label");
+    expect(client.mailboxDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses to remove a label by deleting mail outside label folders", async () => {
+    mockRows([row("m1", "inbox", 1)]);
+
+    await expect(
+      provider("folders").removeThreadLabel("thread-1", "INBOX"),
+    ).rejects.toThrow("not a label");
+    expect(client.messageDelete).not.toHaveBeenCalled();
+  });
+
+  it("moves a folder's mail to the trash before deleting the folder", async () => {
+    prisma.imapMailbox.findUnique.mockResolvedValue({ role: null } as never);
+    client.getMailboxLock.mockImplementation(async (path: string) => {
+      client.mailbox = { path, uidValidity: UID_VALIDITY, exists: 3 } as never;
+      return { release: vi.fn() };
+    });
+
+    await provider().deleteFolder("Projects");
+
+    expect(client.messageMove).toHaveBeenCalledWith("1:*", "Trash", {
+      uid: true,
+    });
+    expect(client.messageMove.mock.invocationCallOrder[0]).toBeLessThan(
+      client.mailboxDelete.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("refuses to delete a system folder", async () => {
+    prisma.imapMailbox.findUnique.mockResolvedValue({ role: "sent" } as never);
+
+    await expect(provider().deleteFolder("Sent")).rejects.toThrow(
+      "cannot be deleted",
+    );
+    expect(client.mailboxDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImapProvider on servers that compare dates only", () => {
+  beforeEach(() => {
+    client.capabilities = new Map([["UIDPLUS", true]]);
+  });
+
+  it("does not take the checked message itself for prior contact", async () => {
+    mockRows([row("m1", "inbox", 5)]);
+    client.search.mockImplementation(async () =>
+      client.mailbox?.path === "INBOX" ? [5] : [],
+    );
+    mockEnvelopes({ 5: "stranger@gmail.com" });
+
+    expect(
+      await provider().hasPreviousCommunicationsWithSenderOrDomain({
+        from: "stranger@gmail.com",
+        date: new Date("2026-11-08T12:00:00Z"),
+        messageId: "m1",
+      }),
+    ).toBe(false);
+  });
+
+  it("leaves mail from later on the cursor day out of a page", async () => {
+    const before = new Date("2026-11-08T12:00:00Z");
+    prisma.imapMailbox.findUniqueOrThrow.mockResolvedValue({
+      ...MAILBOXES.inbox,
+      lastSeenUid: BigInt(10),
+    } as never);
+    mockRows([row("older", "sent", 3), row("early", "sent", 1)]);
+    client.search.mockImplementation(async (criteria: { since?: Date }) =>
+      criteria.since ? [1, 2] : [1, 2, 3],
+    );
+    client.fetch.mockImplementation(async function* (range: string) {
+      const dates: Record<number, string> = {
+        1: "2026-11-08T08:00:00Z",
+        2: "2026-11-08T16:00:00Z",
+      };
+      for (const uid of range.split(",").map(Number)) {
+        yield { uid, internalDate: new Date(dates[uid]) };
+      }
+    });
+
+    await provider().getSentMessageIds({ maxResults: 10, before });
+
+    expect(prisma.imapMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ uid: { in: [BigInt(3), BigInt(1)] } }),
+      }),
+    );
+  });
+});
+
 function moves() {
   return client.messageMove.mock.calls.map(([uids, target], index) => [
     client.getMailboxLock.mock.calls[index][0],
