@@ -32,6 +32,7 @@ import {
 import { searchImapContacts } from "@/utils/imap/contacts";
 import type { SendAsAddress } from "@/utils/email/send-as";
 import { extractEmailAddress } from "@/utils/email";
+import { DraftNotFoundError } from "@/utils/error";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import {
   type ImapAccount,
@@ -990,7 +991,9 @@ export class ImapProvider implements EmailProvider {
     draftId: string,
     _options?: { includeAttachments?: boolean },
   ): Promise<ParsedMessage | null> {
-    const [draft] = await this.getMessagesBatch([draftId]);
+    const [row] = await this.findRows({ id: draftId });
+    if (row?.mailbox.role !== "drafts") return null;
+    const [draft] = await this.readRows([row]);
     return draft ?? null;
   }
 
@@ -1103,8 +1106,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   async sendDraft(draftId: string) {
-    const [row] = await this.findRows({ id: draftId });
-    if (!row) throw new Error("Draft not found");
+    const row = await this.requireDraftRow(draftId);
 
     const raw = await this.withClient((client) => readSource(client, row));
     const mail = await simpleParser(raw);
@@ -2067,8 +2069,7 @@ export class ImapProvider implements EmailProvider {
     draftId: string,
     build: (mail: ParsedMail, attachments: Mail.Attachment[]) => Mail.Options,
   ) {
-    const [row] = await this.findRows({ id: draftId });
-    if (!row) throw new Error("Draft not found");
+    const row = await this.requireDraftRow(draftId);
 
     const source = await this.withClient((client) => readSource(client, row));
     const mail = await simpleParser(source);
@@ -2080,6 +2081,16 @@ export class ImapProvider implements EmailProvider {
       references: mail.references,
     });
     await this.replaceDraft(row, raw);
+  }
+
+  // Message and draft IDs are the same kind of ID here, so only the folder
+  // tells a draft from received mail that must never be rewritten or sent.
+  private async requireDraftRow(draftId: string) {
+    const [row] = await this.findRows({ id: draftId });
+    if (row?.mailbox.role !== "drafts") {
+      throw new DraftNotFoundError("Could not find this draft.");
+    }
+    return row;
   }
 
   private async requireDraftAttachments(draftId: string) {
