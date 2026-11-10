@@ -162,10 +162,25 @@ function toPlanView(plan: ReturnType<typeof sievePlanSchema.parse>) {
     conflicts: toMessages(plan.conflicts),
     errors: toMessages(plan.errors),
     diff: plan.diff?.text ?? "",
-    lands: plan.result
-      ? [plan.result.location, ...(plan.result.folders ?? [])]
-          .filter(Boolean)
-          .join(", ")
-      : null,
+    lands: plan.result ? landsIn(plan.result) : null,
   };
+}
+
+// Proton reports the location and the same folder again by its own name.
+function landsIn(result: {
+  location?: string | null;
+  folders?: string[] | null;
+}) {
+  const names = [result.location, ...(result.folders ?? [])].filter(
+    (name): name is string => !!name,
+  );
+  const seen = new Set<string>();
+  return names
+    .filter((name) => {
+      const key = name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
 }

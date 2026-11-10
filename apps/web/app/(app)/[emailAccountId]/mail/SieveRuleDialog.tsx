@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAction } from "next-safe-action/hooks";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -100,8 +100,13 @@ function Content({
   const [combine, setCombine] = useState<PlanSieveRuleBody["combine"]>("anyof");
   const [folder, setFolder] = useState("");
 
+  // The bound action is new on every render, and so is execute: without the
+  // guard every result would start the next request.
+  const started = useRef(false);
   const { execute: loadSuggestions } = suggest;
   useEffect(() => {
+    if (started.current) return;
+    started.current = true;
     loadSuggestions({ messageId });
   }, [loadSuggestions, messageId]);
 
@@ -134,7 +139,7 @@ function Content({
           : undefined
       }
     >
-      <div className="space-y-4 text-sm">
+      <div className="min-w-0 space-y-4 text-sm">
         <div className="space-y-2">
           <div className="font-medium">Match mail by</div>
           {suggestions.map(({ id, label }) => (
@@ -196,7 +201,7 @@ function Content({
         </div>
 
         {preview && (
-          <div className="space-y-2 rounded-md border p-3">
+          <div className="min-w-0 space-y-2 rounded-md border p-3">
             <div>
               {preview.newFilter ? "New filter" : "Filter"}{" "}
               <span className="font-medium">{preview.target}</span>
@@ -212,7 +217,7 @@ function Content({
               ),
             )}
             {preview.diff && (
-              <pre className="max-h-64 overflow-auto rounded bg-muted p-2 text-xs">
+              <pre className="max-h-64 max-w-full overflow-auto rounded bg-muted p-2 text-xs">
                 {preview.diff}
               </pre>
             )}
