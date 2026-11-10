@@ -59,11 +59,25 @@ export async function markImapDisconnected(emailAccountId: string) {
   });
 }
 
+// The IMAP library flags every refused login. These response codes mean the
+// server could not check the password right now, not that it is wrong.
+const TEMPORARY_LOGIN_CODES = new Set([
+  "UNAVAILABLE",
+  "INUSE",
+  "LIMIT",
+  "SERVERBUG",
+]);
+
 export function isAuthenticationFailure(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "authenticationFailed" in error &&
-    !!error.authenticationFailed
-  );
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("authenticationFailed" in error) ||
+    !error.authenticationFailed
+  ) {
+    return false;
+  }
+  const code =
+    "serverResponseCode" in error ? String(error.serverResponseCode) : "";
+  return !TEMPORARY_LOGIN_CODES.has(code.toUpperCase());
 }

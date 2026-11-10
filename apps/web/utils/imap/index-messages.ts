@@ -103,7 +103,12 @@ export async function resolveThreads(
             },
           ],
         },
-        select: { rfc822MessageId: true, references: true, threadId: true },
+        select: {
+          rfc822MessageId: true,
+          references: true,
+          threadId: true,
+          mailbox: { select: { role: true } },
+        },
       })
     : [];
 

@@ -80,6 +80,9 @@ export function withReviewBeforeDelete(
 
     async bulkTrashFromSenders(fromEmails) {
       for (const senderEmail of fromEmails) {
+        // IMAP page tokens are offsets into the live search, which shrinks as
+        // mail moves out of it. Listing first keeps later pages from skipping.
+        const pages: string[][] = [];
         let pageToken: string | undefined;
         for (let page = 0; page < MAX_SENDER_PAGES; page++) {
           const result = await provider.getMessagesFromSender({
@@ -87,10 +90,12 @@ export function withReviewBeforeDelete(
             maxResults: SENDER_PAGE_SIZE,
             pageToken,
           });
-          const messageIds = result.messages.map((message) => message.id);
-          if (messageIds.length) await target.moveMessages(messageIds);
+          pages.push(result.messages.map((message) => message.id));
           pageToken = result.nextPageToken;
           if (!pageToken) break;
+        }
+        for (const messageIds of pages) {
+          if (messageIds.length) await target.moveMessages(messageIds);
         }
       }
     },

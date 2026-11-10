@@ -31,7 +31,8 @@ import {
 } from "@/utils/email/contact";
 import { searchImapContacts } from "@/utils/imap/contacts";
 import type { SendAsAddress } from "@/utils/email/send-as";
-import { extractEmailAddress } from "@/utils/email";
+import { extractEmailAddress, getSearchTermForSender } from "@/utils/email";
+import { DraftNotFoundError, SafeError } from "@/utils/error";
 import { InvalidMailboxSyncCursorError } from "@/utils/email/mailbox-sync";
 import {
   type ImapAccount,
@@ -75,6 +76,7 @@ import type { ParsedMessage } from "@/utils/types";
 import type { SendEmailBody } from "@/utils/types/mail";
 
 const DEFAULT_PAGE_SIZE = 20;
+const UID_CHUNK = 500;
 
 export class UnsupportedImapOperationError extends Error {
   constructor(operation: string) {
@@ -219,11 +221,17 @@ export class ImapProvider implements EmailProvider {
     before?: Date;
     after?: Date;
   }) {
-    const { senderEmail, ...rest } = options;
-    return this.getMessagesWithPagination({
-      ...rest,
-      query: `from:${senderEmail}`,
+    const { rows, nextPageToken } = await this.searchMailbox({
+      mailbox: await this.requireMailbox("inbox"),
+      criteria: {
+        ...(options.before && { before: options.before }),
+        ...(options.after && { since: options.after }),
+      },
+      sender: options.senderEmail,
+      maxResults: options.maxResults,
+      pageToken: options.pageToken,
     });
+    return { messages: await this.readRows(rows), nextPageToken };
   }
 
   async getMessagesWithAttachments(options: {
@@ -457,11 +465,12 @@ export class ImapProvider implements EmailProvider {
   }
 
   async checkIfReplySent(senderEmail: string) {
-    return (await this.countInRole("sent", { to: senderEmail }, 1)) > 0;
+    return (await this.findInRole("sent", "to", senderEmail)).length > 0;
   }
 
   async countReceivedMessages(senderEmail: string, threshold: number) {
-    return this.countInRole("inbox", { from: senderEmail }, threshold);
+    const uids = await this.findInRole("inbox", "from", senderEmail);
+    return Math.min(uids.length, threshold);
   }
 
   async hasPreviousCommunicationsWithSenderOrDomain(options: {
@@ -469,20 +478,24 @@ export class ImapProvider implements EmailProvider {
     date: Date;
     messageId: string;
   }) {
-    const address = extractEmailAddress(options.from);
-    const sent = await this.countInRole(
-      "sent",
-      { to: address, before: options.date },
-      1,
-    );
-    if (sent > 0) return true;
-    return (
-      (await this.countInRole(
-        "inbox",
-        { from: address, before: options.date },
-        1,
-      )) > 0
-    );
+    // A company domain counts as a whole, as it does for Gmail and Outlook.
+    const sender = getSearchTermForSender(options.from);
+    const before = { before: options.date };
+    if ((await this.findInRole("sent", "to", sender, before)).length) {
+      return true;
+    }
+
+    // Servers without WITHIN compare dates only, so the search also returns
+    // the message being checked.
+    const [own] = await this.findRows({ id: options.messageId });
+    for (const role of ["inbox", "archive"] as const) {
+      const uids = await this.findInRole(role, "from", sender, before);
+      const others = uids.filter(
+        (uid) => own?.mailbox.role !== role || BigInt(uid) !== own.uid,
+      );
+      if (others.length) return true;
+    }
+    return false;
   }
 
   async countMessages(options: { folderId?: string; labelId?: string }) {
@@ -519,7 +532,11 @@ export class ImapProvider implements EmailProvider {
   // --- Actions ---
 
   async archiveThread(threadId: string, _ownerEmail: string) {
-    await this.moveToRole(await this.findThreadRows(threadId), "archive");
+    const rows = await this.findThreadRows(threadId);
+    await this.moveToRole(
+      rows.filter((row) => row.mailbox.role === "inbox"),
+      "archive",
+    );
   }
 
   async archiveThreadWithLabel(
@@ -542,7 +559,10 @@ export class ImapProvider implements EmailProvider {
   }
 
   async unarchiveThread(threadId: string) {
-    await this.moveToRole(await this.findThreadRows(threadId), "inbox");
+    await this.moveToRole(
+      await this.findMovableThreadRows(threadId, ["trash", "junk"]),
+      "inbox",
+    );
   }
 
   async unarchiveMessages(messageIds: string[]) {
@@ -557,7 +577,7 @@ export class ImapProvider implements EmailProvider {
     _ownerEmail: string,
     _actionSource: "user" | "automation",
   ) {
-    await this.moveToRole(await this.findThreadRows(threadId), "trash");
+    await this.moveToRole(await this.findMovableThreadRows(threadId), "trash");
   }
 
   async trashMessages(messageIds: string[]) {
@@ -568,7 +588,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   async untrashThread(threadId: string) {
-    await this.unarchiveThread(threadId);
+    await this.restoreThread(threadId, "trash");
   }
 
   async untrashMessages(messageIds: string[]) {
@@ -576,11 +596,14 @@ export class ImapProvider implements EmailProvider {
   }
 
   async markSpam(threadId: string) {
-    await this.moveToRole(await this.findThreadRows(threadId), "junk");
+    await this.moveToRole(
+      await this.findMovableThreadRows(threadId, ["trash"]),
+      "junk",
+    );
   }
 
   async markNotSpam(threadId: string) {
-    await this.unarchiveThread(threadId);
+    await this.restoreThread(threadId, "junk");
   }
 
   async blockUnsubscribedEmail(messageId: string) {
@@ -593,7 +616,7 @@ export class ImapProvider implements EmailProvider {
     folderName: string,
   ) {
     const path = await this.getOrCreateFolderIdByName(folderName);
-    await this.moveRows(await this.findThreadRows(threadId), path);
+    await this.moveRows(await this.findMovableThreadRows(threadId), path);
   }
 
   async moveMessagesToFolder(messageIds: string[], folderId: string) {
@@ -752,6 +775,7 @@ export class ImapProvider implements EmailProvider {
 
   async deleteLabel(labelId: string) {
     if (this.account.labelStrategy === "folders") {
+      assertLabelFolder(labelId);
       await this.withClient((client) => client.mailboxDelete(labelId));
       return;
     }
@@ -771,6 +795,7 @@ export class ImapProvider implements EmailProvider {
     if (this.account.labelStrategy !== "folders") {
       throw new UnsupportedImapOperationError("Renaming a label");
     }
+    assertLabelFolder(labelId);
     await this.withClient((client) =>
       client.mailboxRename(
         labelId,
@@ -877,7 +902,35 @@ export class ImapProvider implements EmailProvider {
   }
 
   async deleteFolder(folderId: string) {
-    await this.withClient((client) => client.mailboxDelete(folderId));
+    const mailbox = await prisma.imapMailbox.findUnique({
+      where: {
+        connectionId_path: {
+          connectionId: this.account.connectionId,
+          path: folderId,
+        },
+      },
+      select: { role: true },
+    });
+    // A folder the sync does not index can be a virtual one such as All Mail,
+    // where moving everything to the trash would empty the mailbox.
+    if (!mailbox || mailbox.role || isLabelFolder(folderId)) {
+      throw new SafeError("This folder cannot be deleted.");
+    }
+    const trash = await this.requireMailbox("trash");
+
+    await this.withClient(async (client) => {
+      // Deleting a folder destroys its mail on the server, so the mail goes
+      // to the trash first, where it can still be restored.
+      const lock = await client.getMailboxLock(folderId);
+      try {
+        if (client.mailbox && client.mailbox.exists > 0) {
+          await moveUids(client, "1:*", trash.path);
+        }
+      } finally {
+        lock.release();
+      }
+      await client.mailboxDelete(folderId);
+    });
   }
 
   // --- Sending ---
@@ -915,7 +968,7 @@ export class ImapProvider implements EmailProvider {
       attachments: body.attachments?.map(toMailAttachment),
     });
 
-    if (body.providerDraftId) await this.deleteDraft(body.providerDraftId);
+    if (body.providerDraftId) await this.removeSentDraft(body.providerDraftId);
 
     const threadId =
       reply?.threadId ??
@@ -990,7 +1043,9 @@ export class ImapProvider implements EmailProvider {
     draftId: string,
     _options?: { includeAttachments?: boolean },
   ): Promise<ParsedMessage | null> {
-    const [draft] = await this.getMessagesBatch([draftId]);
+    const [row] = await this.findRows({ id: draftId });
+    if (row?.mailbox.role !== "drafts") return null;
+    const [draft] = await this.readRows([row]);
     return draft ?? null;
   }
 
@@ -1090,9 +1145,9 @@ export class ImapProvider implements EmailProvider {
     if (row?.mailbox.role !== "drafts") return false;
 
     await this.withClient(async (client) => {
-      const lock = await client.getMailboxLock(row.mailbox.path);
+      const lock = await lockRow(client, row);
       try {
-        await client.messageDelete(String(row.uid), { uid: true });
+        await deleteUids(client, String(row.uid));
       } finally {
         lock.release();
       }
@@ -1103,8 +1158,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   async sendDraft(draftId: string) {
-    const [row] = await this.findRows({ id: draftId });
-    if (!row) throw new Error("Draft not found");
+    const row = await this.requireDraftRow(draftId);
 
     const raw = await this.withClient((client) => readSource(client, row));
     const mail = await simpleParser(raw);
@@ -1120,7 +1174,7 @@ export class ImapProvider implements EmailProvider {
       raw,
     );
     await this.storeSentCopy(raw, messageId);
-    await this.deleteDraft(draftId);
+    await this.removeSentDraft(draftId);
     return { messageId, threadId: row.threadId };
   }
 
@@ -1420,6 +1474,30 @@ export class ImapProvider implements EmailProvider {
     return rows.filter((row) => !isLabelFolder(row.mailbox.path));
   }
 
+  // The folder is what marks a message as sent or as a draft, so thread moves
+  // leave those where they are.
+  private async findMovableThreadRows(
+    threadId: string,
+    alsoKeep: ImapMailboxRole[] = [],
+  ) {
+    const rows = (await this.findThreadRows(threadId)).filter(
+      (row) => !alsoKeep.includes(row.mailbox.role as ImapMailboxRole),
+    );
+    const received = rows.filter(
+      (row) => row.mailbox.role !== "sent" && row.mailbox.role !== "drafts",
+    );
+    // A thread of nothing but own mail, deleted from the Sent view, has to go.
+    return received.length ? received : rows;
+  }
+
+  private async restoreThread(threadId: string, from: ImapMailboxRole) {
+    const rows = await this.findThreadRows(threadId);
+    await this.moveToRole(
+      rows.filter((row) => row.mailbox.role === from),
+      "inbox",
+    );
+  }
+
   private async readThread(threadId: string, includeDrafts?: boolean) {
     const rows = await this.findThreadRows(threadId);
     const visible = includeDrafts
@@ -1435,10 +1513,17 @@ export class ImapProvider implements EmailProvider {
     const messages = await this.withClient(async (client) => {
       const parsed: ParsedMessage[] = [];
 
-      for (const group of groupByMailbox(rows)) {
-        const lock = await client.getMailboxLock(group.path, {
+      for (const group of groupByMailbox(rows, "skip")) {
+        const lock = await lockIndexedMailbox(client, group, {
           readOnly: true,
+        }).catch((error) => {
+          if (!(error instanceof StaleImapIndexError)) throw error;
+          this.logger.warn("Skipping an IMAP folder with reassigned UIDs", {
+            path: group.path,
+          });
+          return null;
         });
+        if (!lock) continue;
         try {
           const byUid = new Map(group.rows.map((row) => [row.uid, row]));
           for await (const item of client.fetch(
@@ -1533,18 +1618,37 @@ export class ImapProvider implements EmailProvider {
   private async searchMailbox({
     mailbox,
     criteria,
+    sender,
     maxResults = DEFAULT_PAGE_SIZE,
     pageToken,
   }: {
     mailbox: { id: string; path: string };
     criteria: SearchObject;
+    sender?: string;
     maxResults?: number;
     pageToken?: string;
   }) {
     const offset = pageToken ? Number(pageToken) : 0;
 
     return this.withClient(async (client) => {
-      const uids = await searchUids(client, mailbox.path, criteria);
+      let uids = sender
+        ? await searchUidsByAddress(
+            client,
+            mailbox.path,
+            "from",
+            sender,
+            criteria,
+          )
+        : await searchUids(client, mailbox.path, criteria);
+      if (criteria.before instanceof Date) {
+        uids = await dropNotBefore(
+          client,
+          mailbox.path,
+          uids,
+          criteria,
+          criteria.before,
+        );
+      }
       const newestFirst = uids.toReversed();
       const page = newestFirst.slice(offset, offset + maxResults);
       const rows = await ensureIndexed({
@@ -1703,30 +1807,41 @@ export class ImapProvider implements EmailProvider {
     });
   }
 
-  private async countInRole(
+  private async findInRole(
     role: ImapMailboxRole,
-    criteria: SearchObject,
-    limit: number,
+    field: "from" | "to",
+    address: string,
+    criteria?: SearchObject,
   ) {
     const mailbox = await this.findMailbox(role);
-    if (!mailbox) return 0;
-    return this.withClient(async (client) => {
-      const uids = await searchUids(client, mailbox.path, criteria);
-      return Math.min(uids.length, limit);
-    });
+    if (!mailbox) return [];
+    return this.withClient((client) =>
+      searchUidsByAddress(client, mailbox.path, field, address, criteria),
+    );
   }
 
   private async moveFromSender(fromEmail: string, role: ImapMailboxRole) {
     const inbox = await this.requireMailbox("inbox");
     const target = await this.requireMailboxOrCreate(role);
     return this.withClient(async (client) => {
-      const uids = await searchUids(client, inbox.path, { from: fromEmail });
+      const uids = await searchUidsByAddress(
+        client,
+        inbox.path,
+        "from",
+        fromEmail,
+      );
       if (!uids.length) return 0;
 
       const lock = await client.getMailboxLock(inbox.path);
       try {
-        // The sync moves the matching rows, so their app IDs stay valid.
-        await client.messageMove(uids.join(","), target.path, { uid: true });
+        for (let start = 0; start < uids.length; start += UID_CHUNK) {
+          // The sync moves the matching rows, so their app IDs stay valid.
+          await moveUids(
+            client,
+            uids.slice(start, start + UID_CHUNK).join(","),
+            target.path,
+          );
+        }
       } finally {
         lock.release();
       }
@@ -1735,6 +1850,7 @@ export class ImapProvider implements EmailProvider {
   }
 
   private async moveToRole(rows: MessageRow[], role: ImapMailboxRole) {
+    if (!rows.length) return;
     const target = await this.requireMailboxOrCreate(role);
     await this.moveRows(rows, target.path);
   }
@@ -1744,17 +1860,17 @@ export class ImapProvider implements EmailProvider {
     if (!toMove.length) return;
 
     const { connectionId } = this.account;
+    const groups = groupByMailbox(toMove);
 
     await this.withClient(async (client) => {
-      for (const group of groupByMailbox(toMove)) {
-        const lock = await client.getMailboxLock(group.path);
+      for (const group of groups) {
+        const lock = await lockIndexedMailbox(client, group);
         try {
-          const result = await client.messageMove(
+          const result = await moveUids(
+            client,
             group.rows.map((row) => row.uid).join(","),
             targetPath,
-            { uid: true },
           );
-          if (!result) throw new Error("IMAP move failed");
 
           // Without COPYUID the next sync re-links the rows by Message-ID.
           if (result.uidMap && result.uidValidity) {
@@ -1797,16 +1913,17 @@ export class ImapProvider implements EmailProvider {
   }
 
   private async setFlag(rows: MessageRow[], flag: string, enabled: boolean) {
+    const groups = groupByMailbox(rows);
+    if (!groups.length) return;
     await this.withClient(async (client) => {
-      for (const group of groupByMailbox(rows)) {
-        const lock = await client.getMailboxLock(group.path);
+      for (const group of groups) {
+        const lock = await lockIndexedMailbox(client, group);
         try {
           const uids = group.rows.map((row) => row.uid).join(",");
-          if (enabled) {
-            await client.messageFlagsAdd(uids, [flag], { uid: true });
-          } else {
-            await client.messageFlagsRemove(uids, [flag], { uid: true });
-          }
+          const stored = enabled
+            ? await client.messageFlagsAdd(uids, [flag], { uid: true })
+            : await client.messageFlagsRemove(uids, [flag], { uid: true });
+          if (!stored) throw new Error("IMAP flag change failed");
         } finally {
           lock.release();
         }
@@ -1823,22 +1940,27 @@ export class ImapProvider implements EmailProvider {
       case "keywords":
         await this.setFlag(rows, labelToKeyword(labelId), true);
         return;
-      case "folders":
+      case "folders": {
+        assertLabelFolder(labelId);
+        const groups = groupByMailbox(rows);
+        if (!groups.length) return;
         await this.withClient(async (client) => {
-          for (const group of groupByMailbox(rows)) {
-            const lock = await client.getMailboxLock(group.path);
+          for (const group of groups) {
+            const lock = await lockIndexedMailbox(client, group);
             try {
-              await client.messageCopy(
+              const copied = await client.messageCopy(
                 group.rows.map((row) => row.uid).join(","),
                 labelId,
                 { uid: true },
               );
+              if (!copied) throw new Error("IMAP copy failed");
             } finally {
               lock.release();
             }
           }
         });
         return;
+      }
       default:
         await prisma.$transaction(
           rows
@@ -1859,6 +1981,9 @@ export class ImapProvider implements EmailProvider {
         await this.setFlag(rows, labelToKeyword(labelId), false);
         return;
       case "folders": {
+        // The copies below are deleted, which is only safe inside `Labels`,
+        // where a message is a copy of mail that lives elsewhere.
+        assertLabelFolder(labelId);
         const copies = await prisma.imapMessage.findMany({
           where: {
             connectionId: this.account.connectionId,
@@ -1869,13 +1994,15 @@ export class ImapProvider implements EmailProvider {
           },
           include: messageRowInclude,
         });
+        const groups = groupByMailbox(copies);
+        if (!groups.length) return;
         await this.withClient(async (client) => {
-          for (const group of groupByMailbox(copies)) {
-            const lock = await client.getMailboxLock(group.path);
+          for (const group of groups) {
+            const lock = await lockIndexedMailbox(client, group);
             try {
-              await client.messageDelete(
+              await deleteUids(
+                client,
                 group.rows.map((row) => row.uid).join(","),
-                { uid: true },
               );
             } finally {
               lock.release();
@@ -1980,14 +2107,20 @@ export class ImapProvider implements EmailProvider {
     const mailbox = await this.findMailbox("sent");
     if (!mailbox) return;
 
-    await this.withClient(async (client) => {
-      const existing = await searchUids(client, mailbox.path, {
-        header: { "message-id": messageId },
+    // The mail is already delivered when this runs. A failure here must not
+    // make the send look failed, or the user sends it again.
+    try {
+      await this.withClient(async (client) => {
+        const existing = await searchUids(client, mailbox.path, {
+          header: { "message-id": messageId },
+        });
+        if (existing.length) return;
+        const stored = await client.append(mailbox.path, raw, ["\\Seen"]);
+        if (!stored) throw new Error("IMAP append failed");
       });
-      if (!existing.length) {
-        await client.append(mailbox.path, raw, ["\\Seen"]);
-      }
-    });
+    } catch (error) {
+      this.logger.error("Could not file the sent copy", { error });
+    }
   }
 
   private async storeDraft(options: Mail.Options, threadId?: string) {
@@ -2027,6 +2160,14 @@ export class ImapProvider implements EmailProvider {
   private async replaceDraft(row: MessageRow, raw: Buffer) {
     const messageId = `<${row.rfc822MessageId ?? ""}>`;
     const appended = await this.withClient(async (client) => {
+      // Checked before the append: a delete refused afterwards would leave
+      // the new copy next to the old one.
+      const check = await lockRow(client, row);
+      try {
+        await assertExpungeIsScoped(client);
+      } finally {
+        check.release();
+      }
       const result = await appendDraft(
         client,
         row.mailbox.path,
@@ -2034,9 +2175,9 @@ export class ImapProvider implements EmailProvider {
         messageId,
         row.uid,
       );
-      const lock = await client.getMailboxLock(row.mailbox.path);
+      const lock = await lockRow(client, row);
       try {
-        await client.messageDelete(String(row.uid), { uid: true });
+        await deleteUids(client, String(row.uid));
       } finally {
         lock.release();
       }
@@ -2067,8 +2208,7 @@ export class ImapProvider implements EmailProvider {
     draftId: string,
     build: (mail: ParsedMail, attachments: Mail.Attachment[]) => Mail.Options,
   ) {
-    const [row] = await this.findRows({ id: draftId });
-    if (!row) throw new Error("Draft not found");
+    const row = await this.requireDraftRow(draftId);
 
     const source = await this.withClient((client) => readSource(client, row));
     const mail = await simpleParser(source);
@@ -2080,6 +2220,23 @@ export class ImapProvider implements EmailProvider {
       references: mail.references,
     });
     await this.replaceDraft(row, raw);
+  }
+
+  // Message and draft IDs are the same kind of ID here, so only the folder
+  // tells a draft from received mail that must never be rewritten or sent.
+  private async requireDraftRow(draftId: string) {
+    const [row] = await this.findRows({ id: draftId });
+    if (row?.mailbox.role !== "drafts") {
+      throw new DraftNotFoundError("Could not find this draft.");
+    }
+    return row;
+  }
+
+  // The mail is out. Failing now would invite sending it a second time.
+  private async removeSentDraft(draftId: string) {
+    await this.deleteDraft(draftId).catch((error) =>
+      this.logger.error("Could not remove a sent IMAP draft", { error }),
+    );
   }
 
   private async requireDraftAttachments(draftId: string) {
@@ -2155,19 +2312,90 @@ function sortChronologically(messages: ParsedMessage[]) {
   );
 }
 
-// Stale UIDVALIDITY rows point at nothing valid until the next sync relinks them.
-function groupByMailbox(rows: MessageRow[]) {
-  const groups = new Map<string, { path: string; rows: MessageRow[] }>();
+// Stale UIDVALIDITY rows point at nothing valid until the next sync relinks
+// them. Reads leave them out. A write fails, so it never reports success for
+// mail it did not touch.
+function groupByMailbox(rows: MessageRow[], stale: "fail" | "skip" = "fail") {
+  const groups = new Map<
+    string,
+    { path: string; uidValidity: bigint; rows: MessageRow[] }
+  >();
   for (const row of rows) {
-    if (row.uidValidity !== row.mailbox.uidValidity) continue;
+    if (row.uidValidity !== row.mailbox.uidValidity) {
+      if (stale === "fail") throw staleIndexError();
+      continue;
+    }
     const group = groups.get(row.mailboxId) ?? {
       path: row.mailbox.path,
+      uidValidity: row.mailbox.uidValidity,
       rows: [],
     };
     group.rows.push(row);
     groups.set(row.mailboxId, group);
   }
   return [...groups.values()];
+}
+
+function assertLabelFolder(path: string) {
+  if (!isLabelFolder(path)) throw new SafeError("This is not a label.");
+}
+
+class StaleImapIndexError extends SafeError {}
+
+function staleIndexError() {
+  return new StaleImapIndexError(
+    "This folder changed on the mail server. Try again in a minute.",
+  );
+}
+
+// The index can lag behind the server. A folder whose UIDVALIDITY changed has
+// handed out its UIDs again, so a stored UID would address some other message.
+async function lockIndexedMailbox(
+  client: ImapFlow,
+  mailbox: { path: string; uidValidity: bigint },
+  options?: { readOnly?: boolean },
+) {
+  const lock = await client.getMailboxLock(mailbox.path, options);
+  if (client.mailbox && client.mailbox.uidValidity === mailbox.uidValidity) {
+    return lock;
+  }
+  lock.release();
+  throw staleIndexError();
+}
+
+async function lockRow(
+  client: ImapFlow,
+  row: MessageRow,
+  options?: { readOnly?: boolean },
+) {
+  if (row.uidValidity !== row.mailbox.uidValidity) throw staleIndexError();
+  return lockIndexedMailbox(client, row.mailbox, options);
+}
+
+async function deleteUids(client: ImapFlow, uids: string) {
+  await assertExpungeIsScoped(client);
+  const deleted = await client.messageDelete(uids, { uid: true });
+  if (!deleted) throw new Error("IMAP delete failed");
+}
+
+async function moveUids(client: ImapFlow, uids: string, targetPath: string) {
+  // Without MOVE the library copies, then deletes and expunges the source.
+  if (!client.capabilities.has("MOVE")) await assertExpungeIsScoped(client);
+  const result = await client.messageMove(uids, targetPath, { uid: true });
+  if (!result) throw new Error("IMAP move failed");
+  return result;
+}
+
+// Without UIDPLUS, EXPUNGE removes every message flagged \Deleted in the
+// folder, including mail another client only marked for deletion.
+async function assertExpungeIsScoped(client: ImapFlow) {
+  if (client.capabilities.has("UIDPLUS")) return;
+  const flagged = await client.search({ deleted: true }, { uid: true });
+  if (Array.isArray(flagged) && flagged.length) {
+    throw new SafeError(
+      "This mail server cannot remove a single message while other mail in the folder is marked for deletion. Empty or restore that mail in your mail app first.",
+    );
+  }
 }
 
 async function searchUids(
@@ -2186,10 +2414,88 @@ async function searchUids(
   }
 }
 
+// Without WITHIN, SEARCH BEFORE compares dates only and also returns mail from
+// later on that day. A caller that pages back by time would get the same mail
+// again, filter it out, and take the empty page for the end.
+async function dropNotBefore(
+  client: ImapFlow,
+  path: string,
+  uids: number[],
+  criteria: SearchObject,
+  before: Date,
+) {
+  if (client.capabilities.has("WITHIN") || !uids.length) return uids;
+
+  const sameDay = new Set(
+    await searchUids(client, path, { ...criteria, since: before }),
+  );
+  const candidates = uids.filter((uid) => sameDay.has(uid));
+  if (!candidates.length) return uids;
+
+  const late = new Set<number>();
+  const lock = await client.getMailboxLock(path, { readOnly: true });
+  try {
+    for (let start = 0; start < candidates.length; start += UID_CHUNK) {
+      for await (const message of client.fetch(
+        candidates.slice(start, start + UID_CHUNK).join(","),
+        { uid: true, internalDate: true },
+        { uid: true },
+      )) {
+        const date = message.internalDate && new Date(message.internalDate);
+        if (date && date >= before) late.add(message.uid);
+      }
+    }
+  } finally {
+    lock.release();
+  }
+  return uids.filter((uid) => !late.has(uid));
+}
+
+// IMAP SEARCH FROM/TO matches substrings and display names, so a search for
+// bob@example.com also returns notbob@example.com. The envelope decides.
+// A bare domain matches every address at that domain.
+async function searchUidsByAddress(
+  client: ImapFlow,
+  path: string,
+  field: "from" | "to",
+  address: string,
+  criteria: SearchObject = {},
+): Promise<number[]> {
+  const wanted = (extractEmailAddress(address) || address).toLowerCase();
+  const matches = (candidate: string | undefined) =>
+    !!candidate &&
+    (candidate.toLowerCase() === wanted ||
+      (!wanted.includes("@") &&
+        candidate.toLowerCase().endsWith(`@${wanted}`)));
+  const lock = await client.getMailboxLock(path, { readOnly: true });
+  try {
+    const uids = await client.search(
+      { ...criteria, [field]: wanted },
+      { uid: true },
+    );
+    if (!Array.isArray(uids)) throw new Error("IMAP search failed");
+
+    const exact: number[] = [];
+    for (let start = 0; start < uids.length; start += UID_CHUNK) {
+      for await (const message of client.fetch(
+        uids.slice(start, start + UID_CHUNK).join(","),
+        { uid: true, envelope: true },
+        { uid: true },
+      )) {
+        const addresses = message.envelope?.[field] ?? [];
+        if (addresses.some((item) => matches(item.address))) {
+          exact.push(message.uid);
+        }
+      }
+    }
+    return exact;
+  } finally {
+    lock.release();
+  }
+}
+
 async function readSource(client: ImapFlow, row: MessageRow) {
-  const lock = await client.getMailboxLock(row.mailbox.path, {
-    readOnly: true,
-  });
+  const lock = await lockRow(client, row, { readOnly: true });
   try {
     const message = await client.fetchOne(
       String(row.uid),
@@ -2250,12 +2556,17 @@ export function parseImapQuery(query: string | undefined): SearchObject {
     const key = match?.[1].toLowerCase();
     const value = match?.[2].replace(/^"|"$/g, "") ?? "";
 
+    const date = new Date(value);
+    const isDate = !Number.isNaN(date.getTime());
+
     if (key === "from") criteria.from = value;
     else if (key === "to") criteria.to = value;
     else if (key === "subject") criteria.subject = value;
-    else if (key === "before") criteria.before = new Date(value);
-    else if (key === "after" || key === "since")
-      criteria.since = new Date(value);
+    // An unreadable date stays a search term. Dropping it would widen the
+    // search to mail the query meant to leave out.
+    else if (key === "before" && isDate) criteria.before = date;
+    else if ((key === "after" || key === "since") && isDate)
+      criteria.since = date;
     else if (token === "is:unread") criteria.seen = false;
     else if (token === "is:read") criteria.seen = true;
     else if (token === "is:starred") criteria.flagged = true;

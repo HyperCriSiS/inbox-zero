@@ -12,12 +12,26 @@ import {
 } from "@/utils/imap/connection";
 import { verifySmtp } from "@/utils/imap/smtp";
 import { syncImapAccount } from "@/utils/imap/sync";
+import { checkRateLimit, createRateLimitKey } from "@/utils/rate-limit";
 import prisma from "@/utils/prisma";
 
 export const linkImapAccountAction = actionClientUser
   .metadata({ name: "linkImapAccount" })
   .inputSchema(linkImapAccountBody)
   .action(async ({ ctx: { userId, logger }, parsedInput: input }) => {
+    // Every attempt makes this server log in somewhere on the user's behalf.
+    const { limited } = await checkRateLimit({
+      rule: {
+        key: createRateLimitKey(["rate-limit", "imap-link", userId]),
+        limit: 10,
+        windowSeconds: 10 * 60,
+      },
+      logger,
+    });
+    if (limited) {
+      throw new SafeError("Too many attempts. Try again in a few minutes.");
+    }
+
     const existing = await prisma.emailAccount.findUnique({
       where: { email: input.email },
       select: {
@@ -79,17 +93,65 @@ export const linkImapAccountAction = actionClientUser
     };
 
     if (existing) {
+      const previous = await prisma.imapConnection.findUniqueOrThrow({
+        where: { emailAccountId },
+        select: { id: true, imapHost: true, username: true },
+      });
       // Sync state stays, so a new password does not reprocess the mailbox.
+      // Another server or login is another mailbox, where the indexed UIDs
+      // would address unrelated mail.
+      const sameMailbox =
+        previous.imapHost.toLowerCase() === input.imapHost.toLowerCase() &&
+        previous.username === input.username;
+      const dropped = sameMailbox
+        ? []
+        : await prisma.imapMessage.findMany({
+            where: { connectionId: previous.id },
+            select: { id: true },
+          });
+
       await prisma.$transaction([
+        ...(sameMailbox
+          ? []
+          : [
+              prisma.imapMailbox.deleteMany({
+                where: { connectionId: previous.id },
+              }),
+              prisma.imapSyncItem.deleteMany({
+                where: { connectionId: previous.id },
+              }),
+              // The local mail client learns of removals from this feed.
+              prisma.imapChange.createMany({
+                data: dropped.map(({ id }) => ({
+                  connectionId: previous.id,
+                  messageId: id,
+                  kind: "delete",
+                })),
+              }),
+            ]),
         prisma.imapConnection.update({
           where: { emailAccountId },
-          data: { ...settings, lastSyncError: null },
+          data: {
+            ...settings,
+            lastSyncError: null,
+            // A sync still running against the old mailbox loses its lease
+            // and cannot write that mailbox's mail back.
+            ...(!sameMailbox && { syncLeaseOwner: null, syncLeaseUntil: null }),
+          },
         }),
         prisma.account.update({
           where: { id: existing.accountId },
           data: { disconnectedAt: null },
         }),
       ]);
+      if (!sameMailbox) {
+        after(() =>
+          syncImapAccount({
+            emailAccountId,
+            logger: logger.with({ emailAccountId }),
+          }),
+        );
+      }
       return { emailAccountId };
     }
 

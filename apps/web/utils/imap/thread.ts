@@ -34,18 +34,28 @@ export function resolveThread({
     ...parseMessageIds(references),
     ...parseMessageIds(inReplyTo),
   ];
-  const related = ownId ? [...ancestors, ownId] : ancestors;
-
-  const matches = [
-    ...new Set([
-      ...related.flatMap((id) => knownThreadIds.get(id) ?? []),
-      ...childThreadIds,
-    ]),
+  // The direct parent decides, then the rest of the chain from its newest end.
+  const nearestFirst = [
+    ...parseMessageIds(inReplyTo),
+    ...parseMessageIds(references).toReversed(),
+    ...(ownId ? [ownId] : []),
   ];
 
-  if (matches.length > 0) {
-    const [threadId, ...mergeThreadIds] = matches;
-    return { threadId, mergeThreadIds };
+  const [threadId] = [
+    ...nearestFirst.flatMap((id) => knownThreadIds.get(id) ?? []),
+    ...childThreadIds,
+  ];
+
+  if (threadId) {
+    // Only replies that were waiting for this message are merged. What a
+    // message lists as its ancestors is the sender's claim, and one message
+    // naming two conversations must not fuse them for good.
+    return {
+      threadId,
+      mergeThreadIds: [...new Set(childThreadIds)].filter(
+        (id) => id !== threadId,
+      ),
+    };
   }
 
   const root = ancestors[0] ?? ownId;

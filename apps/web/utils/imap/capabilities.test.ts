@@ -18,8 +18,14 @@ describe("detectFeatures", () => {
   });
 
   it("uses label folders when keywords are unavailable", () => {
+    expect(
+      detect({ folderPaths: ["INBOX", "Labels", "Folders"] }).labelStrategy,
+    ).toBe("folders");
+  });
+
+  it("does not take a lone Labels folder for label folders", () => {
     expect(detect({ folderPaths: ["INBOX", "Labels"] }).labelStrategy).toBe(
-      "folders",
+      "database",
     );
   });
 

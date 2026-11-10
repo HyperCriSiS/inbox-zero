@@ -49,6 +49,57 @@ function parse(
 }
 
 describe("parseCalDavEvents", () => {
+  it("does not let one object's time zone definition leak into the next", () => {
+    const event = [
+      "BEGIN:VEVENT",
+      "UID:leak",
+      "DTSTAMP:20261101T000000Z",
+      "DTSTART;TZID=Europe/Berlin:20261110T100000",
+      "DTEND;TZID=Europe/Berlin:20261110T110000",
+      "SUMMARY:Leak",
+      "END:VEVENT",
+    ];
+    const wrongZone = [
+      "BEGIN:VTIMEZONE",
+      "TZID:Europe/Berlin",
+      "BEGIN:STANDARD",
+      "DTSTART:19700101T000000",
+      "TZOFFSETFROM:+0900",
+      "TZOFFSETTO:+0900",
+      "END:STANDARD",
+      "END:VTIMEZONE",
+    ];
+
+    parse(ics(...wrongZone, ...event));
+    const [item] = parse(ics(...event));
+
+    expect(item.event.startTime.toISOString()).toBe("2026-11-10T09:00:00.000Z");
+  });
+
+  it("keeps the other events when one series never ends", () => {
+    const items = parse(
+      ics(
+        "BEGIN:VEVENT",
+        "UID:runaway",
+        "DTSTAMP:19700101T000000Z",
+        "DTSTART:19700101T000000Z",
+        "DTEND:19700101T000001Z",
+        "RRULE:FREQ=SECONDLY",
+        "SUMMARY:Runaway",
+        "END:VEVENT",
+        "BEGIN:VEVENT",
+        "UID:normal",
+        "DTSTAMP:20261101T000000Z",
+        "DTSTART:20261105T100000Z",
+        "DTEND:20261105T110000Z",
+        "SUMMARY:Normal",
+        "END:VEVENT",
+      ),
+    );
+
+    expect(items.map((item) => item.event.title)).toEqual(["Normal"]);
+  });
+
   it("reads a timed event in its own time zone", () => {
     const [item] = parse(
       ics(

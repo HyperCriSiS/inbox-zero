@@ -136,7 +136,11 @@ async function sendEmail({
     }
   }
 
-  if (!emailAccount.account.refresh_token) {
+  // IMAP accounts sign in with a password and never have a refresh token.
+  if (
+    !emailAccount.account.refresh_token &&
+    !isImapProvider(emailAccount.account.provider)
+  ) {
     logger.warn("Skipping inbox health email: account has no refresh token");
     await startNextInboxHealthWindow(emailAccountId);
     return { success: false, message: "Account has no refresh token" };
