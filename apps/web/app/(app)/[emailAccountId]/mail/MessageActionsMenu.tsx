@@ -1,13 +1,16 @@
 "use client";
 
 import { type ComponentProps, useState } from "react";
+import useSWR from "swr";
 import {
   CodeIcon,
   DownloadIcon,
+  FilterIcon,
   MoreHorizontalIcon,
   PrinterIcon,
   SparklesIcon,
 } from "lucide-react";
+import type { GetSieveServerResponse } from "@/app/api/user/sieve/route";
 import { FixWithChat } from "@/app/(app)/[emailAccountId]/assistant/FixWithChat";
 import { getRuleResultReasonDisplay } from "@/app/(app)/[emailAccountId]/assistant/ResultDisplay";
 import { RuleActions } from "@/components/RuleActions";
@@ -19,6 +22,7 @@ import {
   saveMessageSource,
 } from "@/app/(app)/[emailAccountId]/mail/message-source";
 import { MessageSourceDialog } from "@/app/(app)/[emailAccountId]/mail/MessageSourceDialog";
+import { SieveRuleDialog } from "@/app/(app)/[emailAccountId]/mail/SieveRuleDialog";
 import { printMessages } from "@/app/(app)/[emailAccountId]/mail/print-messages";
 import { toastError } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
@@ -50,6 +54,8 @@ export function MessageActionsMenu({
 }) {
   const { emailAccountId } = useAccount();
   const [isSourceOpen, setIsSourceOpen] = useState(false);
+  const [isSieveOpen, setIsSieveOpen] = useState(false);
+  const { data: sieve } = useSWR<GetSieveServerResponse>("/api/user/sieve");
   const messagePlans = plans.filter((plan) => plan.messageId === message.id);
   const subject = message.headers.subject ?? "";
 
@@ -131,6 +137,13 @@ export function MessageActionsMenu({
             <CodeIcon className="mr-2 size-4" />
             Show original
           </DropdownMenuItem>
+
+          {sieve?.available && (
+            <DropdownMenuItem onSelect={() => setIsSieveOpen(true)}>
+              <FilterIcon className="mr-2 size-4" />
+              Create Sieve rule
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -141,6 +154,16 @@ export function MessageActionsMenu({
         open={isSourceOpen}
         onOpenChange={setIsSourceOpen}
       />
+
+      {sieve?.available && (
+        <SieveRuleDialog
+          emailAccountId={emailAccountId}
+          messageId={message.id}
+          canApply={sieve.canApply}
+          open={isSieveOpen}
+          onOpenChange={setIsSieveOpen}
+        />
+      )}
     </>
   );
 }
