@@ -911,7 +911,9 @@ export class ImapProvider implements EmailProvider {
       },
       select: { role: true },
     });
-    if (mailbox?.role || isLabelFolder(folderId)) {
+    // A folder the sync does not index can be a virtual one such as All Mail,
+    // where moving everything to the trash would empty the mailbox.
+    if (!mailbox || mailbox.role || isLabelFolder(folderId)) {
       throw new SafeError("This folder cannot be deleted.");
     }
     const trash = await this.requireMailbox("trash");
@@ -966,7 +968,7 @@ export class ImapProvider implements EmailProvider {
       attachments: body.attachments?.map(toMailAttachment),
     });
 
-    if (body.providerDraftId) await this.deleteDraft(body.providerDraftId);
+    if (body.providerDraftId) await this.removeSentDraft(body.providerDraftId);
 
     const threadId =
       reply?.threadId ??
@@ -1172,10 +1174,7 @@ export class ImapProvider implements EmailProvider {
       raw,
     );
     await this.storeSentCopy(raw, messageId);
-    // The mail is out. Failing now would invite sending it a second time.
-    await this.deleteDraft(draftId).catch((error) =>
-      this.logger.error("Could not remove a sent IMAP draft", { error }),
-    );
+    await this.removeSentDraft(draftId);
     return { messageId, threadId: row.threadId };
   }
 
@@ -1481,9 +1480,14 @@ export class ImapProvider implements EmailProvider {
     threadId: string,
     alsoKeep: ImapMailboxRole[] = [],
   ) {
-    const keep: (string | null)[] = ["sent", "drafts", ...alsoKeep];
-    const rows = await this.findThreadRows(threadId);
-    return rows.filter((row) => !keep.includes(row.mailbox.role));
+    const rows = (await this.findThreadRows(threadId)).filter(
+      (row) => !alsoKeep.includes(row.mailbox.role as ImapMailboxRole),
+    );
+    const received = rows.filter(
+      (row) => row.mailbox.role !== "sent" && row.mailbox.role !== "drafts",
+    );
+    // A thread of nothing but own mail, deleted from the Sent view, has to go.
+    return received.length ? received : rows;
   }
 
   private async restoreThread(threadId: string, from: ImapMailboxRole) {
@@ -1512,7 +1516,14 @@ export class ImapProvider implements EmailProvider {
       for (const group of groupByMailbox(rows, "skip")) {
         const lock = await lockIndexedMailbox(client, group, {
           readOnly: true,
+        }).catch((error) => {
+          if (!(error instanceof StaleImapIndexError)) throw error;
+          this.logger.warn("Skipping an IMAP folder with reassigned UIDs", {
+            path: group.path,
+          });
+          return null;
         });
+        if (!lock) continue;
         try {
           const byUid = new Map(group.rows.map((row) => [row.uid, row]));
           for await (const item of client.fetch(
@@ -2149,6 +2160,14 @@ export class ImapProvider implements EmailProvider {
   private async replaceDraft(row: MessageRow, raw: Buffer) {
     const messageId = `<${row.rfc822MessageId ?? ""}>`;
     const appended = await this.withClient(async (client) => {
+      // Checked before the append: a delete refused afterwards would leave
+      // the new copy next to the old one.
+      const check = await lockRow(client, row);
+      try {
+        await assertExpungeIsScoped(client);
+      } finally {
+        check.release();
+      }
       const result = await appendDraft(
         client,
         row.mailbox.path,
@@ -2211,6 +2230,13 @@ export class ImapProvider implements EmailProvider {
       throw new DraftNotFoundError("Could not find this draft.");
     }
     return row;
+  }
+
+  // The mail is out. Failing now would invite sending it a second time.
+  private async removeSentDraft(draftId: string) {
+    await this.deleteDraft(draftId).catch((error) =>
+      this.logger.error("Could not remove a sent IMAP draft", { error }),
+    );
   }
 
   private async requireDraftAttachments(draftId: string) {
@@ -2314,8 +2340,10 @@ function assertLabelFolder(path: string) {
   if (!isLabelFolder(path)) throw new SafeError("This is not a label.");
 }
 
+class StaleImapIndexError extends SafeError {}
+
 function staleIndexError() {
-  return new SafeError(
+  return new StaleImapIndexError(
     "This folder changed on the mail server. Try again in a minute.",
   );
 }
@@ -2436,9 +2464,9 @@ async function searchUidsByAddress(
   const wanted = (extractEmailAddress(address) || address).toLowerCase();
   const matches = (candidate: string | undefined) =>
     !!candidate &&
-    (wanted.includes("@")
-      ? candidate.toLowerCase() === wanted
-      : candidate.toLowerCase().endsWith(`@${wanted}`));
+    (candidate.toLowerCase() === wanted ||
+      (!wanted.includes("@") &&
+        candidate.toLowerCase().endsWith(`@${wanted}`)));
   const lock = await client.getMailboxLock(path, { readOnly: true });
   try {
     const uids = await client.search(

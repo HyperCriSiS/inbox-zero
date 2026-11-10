@@ -180,6 +180,60 @@ describe("ImapProvider thread actions", () => {
   });
 });
 
+describe("ImapProvider thread actions on own mail", () => {
+  it("trashes a thread that only holds sent mail", async () => {
+    mockRows([row("reply", "sent", 2)]);
+
+    await provider().trashThread("thread-1", "me@example.com", "user");
+
+    expect(moves()).toEqual([["Sent", "2", "Trash"]]);
+  });
+});
+
+describe("ImapProvider drafts after a send or before an edit", () => {
+  it("reports a sent mail as sent when its draft cannot be removed", async () => {
+    mockRows([row("d1", "drafts", 3)]);
+    client.messageDelete.mockResolvedValue(false);
+
+    await expect(
+      provider("folders").sendEmailWithHtml({
+        to: "ana@example.org",
+        subject: "Hello",
+        messageHtml: "<p>Hi</p>",
+        providerDraftId: "d1",
+      } as never),
+    ).resolves.toMatchObject({ messageId: expect.any(String) });
+    expect(sendRawMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not append a new draft copy when the old one cannot be removed", async () => {
+    mockRows([row("d1", "drafts", 3)]);
+    client.capabilities = new Map();
+    client.search.mockResolvedValue([8]);
+    client.fetchOne.mockResolvedValue({
+      source: Buffer.from("Subject: Draft\r\n\r\nBody\r\n"),
+    });
+
+    await expect(
+      provider().updateDraft("d1", { subject: "Changed" }),
+    ).rejects.toThrow("marked for deletion");
+    expect(client.append).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImapProvider reads", () => {
+  it("leaves out a folder whose UIDs were reassigned instead of failing", async () => {
+    mockRows([row("m1", "inbox", 1)]);
+    client.getMailboxLock.mockImplementation(async (path: string) => {
+      client.mailbox = { path, uidValidity: UID_VALIDITY + BigInt(1) };
+      return { release: vi.fn() };
+    });
+
+    expect(await provider().getMessagesBatch(["m1"])).toEqual([]);
+    expect(client.fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe("ImapProvider writes", () => {
   it("refuses to act when the folder's UIDs were reassigned", async () => {
     mockRows([row("m1", "inbox", 1)]);
@@ -257,6 +311,15 @@ describe("ImapProvider labels and folders", () => {
     expect(client.messageMove.mock.invocationCallOrder[0]).toBeLessThan(
       client.mailboxDelete.mock.invocationCallOrder[0],
     );
+  });
+
+  it("refuses to delete a folder the sync does not index", async () => {
+    prisma.imapMailbox.findUnique.mockResolvedValue(null);
+
+    await expect(provider().deleteFolder("All Mail")).rejects.toThrow(
+      "cannot be deleted",
+    );
+    expect(client.messageMove).not.toHaveBeenCalled();
   });
 
   it("refuses to delete a system folder", async () => {

@@ -131,13 +131,27 @@ export const linkImapAccountAction = actionClientUser
             ]),
         prisma.imapConnection.update({
           where: { emailAccountId },
-          data: { ...settings, lastSyncError: null },
+          data: {
+            ...settings,
+            lastSyncError: null,
+            // A sync still running against the old mailbox loses its lease
+            // and cannot write that mailbox's mail back.
+            ...(!sameMailbox && { syncLeaseOwner: null, syncLeaseUntil: null }),
+          },
         }),
         prisma.account.update({
           where: { id: existing.accountId },
           data: { disconnectedAt: null },
         }),
       ]);
+      if (!sameMailbox) {
+        after(() =>
+          syncImapAccount({
+            emailAccountId,
+            logger: logger.with({ emailAccountId }),
+          }),
+        );
+      }
       return { emailAccountId };
     }
 

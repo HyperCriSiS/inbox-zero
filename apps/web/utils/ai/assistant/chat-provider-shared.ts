@@ -2,7 +2,6 @@ import type { ToolSet } from "ai";
 import type { Logger } from "@/utils/logger";
 import type { RuleReadState } from "./chat-rule-state";
 import { googleChatProviderConfig } from "./chat-provider-google";
-import { imapChatProviderConfig } from "./chat-provider-imap";
 import { microsoftChatProviderConfig } from "./chat-provider-microsoft";
 
 type ChatToolOptions = {
@@ -43,7 +42,6 @@ export type AssistantChatProvider = AssistantChatProviderConfig & {
 const providerPolicies: Record<string, AssistantChatProvider> = {
   google: buildAssistantChatProvider(googleChatProviderConfig),
   microsoft: buildAssistantChatProvider(microsoftChatProviderConfig),
-  imap: buildAssistantChatProvider(imapChatProviderConfig),
 };
 
 export function getAssistantChatProvider(
