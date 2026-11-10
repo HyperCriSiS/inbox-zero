@@ -212,6 +212,27 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     );
   });
 
+  test("new mail in a chosen folder runs rules, other folders do not", async () => {
+    for (const path of ["Pakete", "Other"]) {
+      await client.mailboxCreate(path).catch(() => undefined);
+    }
+    await sync();
+    await prisma.imapConnection.update({
+      where: { id: connectionId },
+      data: { ruleFolders: ["Pakete"] },
+    });
+    const calls = newMailCalls();
+
+    await deliver("parcel@x", { folder: "Pakete" });
+    await deliver("other@x", { folder: "Other" });
+    await sync();
+    await sync();
+
+    expect(newMailCalls()).toBe(calls + 1);
+    const [input] = vi.mocked(processHistoryItem).mock.calls.at(-1) ?? [];
+    expect(input?.messageId).toBe((await row("parcel@x")).id);
+  });
+
   test("an AI outage keeps new mail pending without using up attempts", async () => {
     const callsBefore = newMailCalls();
     vi.mocked(processHistoryItem).mockRejectedValueOnce(

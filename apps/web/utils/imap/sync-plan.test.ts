@@ -215,6 +215,7 @@ describe("shouldEnqueueForRules", () => {
         shouldEnqueueForRules({
           mode: "incremental",
           role,
+          isRuleFolder: false,
           isSecondCopyOfOwnMail: false,
         }),
       ).toBe(true);
@@ -229,7 +230,34 @@ describe("shouldEnqueueForRules", () => {
     ["incremental", "inbox", true],
   ] as const)("skips mode=%s role=%s copy=%s", (mode, role, copy) => {
     expect(
-      shouldEnqueueForRules({ mode, role, isSecondCopyOfOwnMail: copy }),
+      shouldEnqueueForRules({
+        mode,
+        role,
+        isRuleFolder: false,
+        isSecondCopyOfOwnMail: copy,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs rules on new mail in a folder the user chose", () => {
+    expect(
+      shouldEnqueueForRules({
+        mode: "incremental",
+        role: null,
+        isRuleFolder: true,
+        isSecondCopyOfOwnMail: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not replay a chosen folder on its first scan", () => {
+    expect(
+      shouldEnqueueForRules({
+        mode: "baseline",
+        role: null,
+        isRuleFolder: true,
+        isSecondCopyOfOwnMail: false,
+      }),
     ).toBe(false);
   });
 });

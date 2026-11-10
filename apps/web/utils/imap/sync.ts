@@ -182,6 +182,7 @@ async function syncIndex({
     where: { emailAccountId },
     select: {
       id: true,
+      ruleFolders: true,
       mailboxes: {
         select: {
           id: true,
@@ -250,6 +251,7 @@ async function syncIndex({
     scans,
     orphaned,
     removedMailboxIds: removedMailboxes.map((mailbox) => mailbox.id),
+    ruleFolders: connection.ruleFolders,
     features: detectFeatures({
       capabilities: client.capabilities.keys(),
       permanentFlags,
@@ -357,6 +359,7 @@ async function commitScans({
   scans,
   orphaned,
   removedMailboxIds,
+  ruleFolders,
   features,
   capabilities,
 }: {
@@ -365,6 +368,7 @@ async function commitScans({
   scans: MailboxScan[];
   orphaned: IndexedMessage[];
   removedMailboxIds: string[];
+  ruleFolders: string[];
   features: ReturnType<typeof detectFeatures>;
   capabilities: string[];
 }) {
@@ -426,6 +430,7 @@ async function commitScans({
       shouldEnqueueForRules({
         mode: scan.mode,
         role: scan.role,
+        isRuleFolder: ruleFolders.includes(scan.path),
         isSecondCopyOfOwnMail: isSecondCopyOfOwnMail(
           scan.role,
           rolesOfIndexedCopies.get(message.rfc822MessageId ?? "") ?? [],

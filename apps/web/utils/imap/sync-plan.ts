@@ -1,3 +1,4 @@
+import { isLabelFolder } from "@/utils/imap/labels";
 import type { ImapMailboxRole } from "@/utils/imap/message";
 
 export type MailboxSyncMode = "baseline" | "reset" | "incremental" | "idle";
@@ -168,22 +169,36 @@ export function diffFlags(
 
 /**
  * Only fresh arrivals run rules. Baselines and resets replay existing mail, and
- * mail to oneself was handled when its first copy arrived.
+ * mail to oneself was handled when its first copy arrived. Besides the inbox,
+ * the user can name folders that server-side filters such as Sieve fill.
  */
 export function shouldEnqueueForRules({
   mode,
   role,
+  isRuleFolder,
   isSecondCopyOfOwnMail,
 }: {
   mode: Exclude<MailboxSyncMode, "idle">;
   role: ImapMailboxRole | null;
+  isRuleFolder: boolean;
   isSecondCopyOfOwnMail: boolean;
 }) {
   return (
     mode === "incremental" &&
-    INTAKE_ROLES.includes(role) &&
+    (INTAKE_ROLES.includes(role) || isRuleFolder) &&
     !isSecondCopyOfOwnMail
   );
+}
+
+/**
+ * Folders the user can let run rules. System folders already do or must not,
+ * and label folders only hold copies of mail that lives elsewhere.
+ */
+export function isRuleFolderCandidate(mailbox: {
+  path: string;
+  role: string | null;
+}) {
+  return !mailbox.role && !isLabelFolder(mailbox.path);
 }
 
 /**
