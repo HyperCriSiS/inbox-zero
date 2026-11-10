@@ -54,6 +54,18 @@ The app asks the server what it supports, so no provider is special-cased.
   certificate field. From Docker the host is `host.docker.internal`, not `127.0.0.1`.
 - **Gmail and Outlook:** use the native connection, which supports push and filters.
 
+## Sieve filters
+
+Connect a Sieve server, such as Sieve Buddy, under **Integrations** as a custom MCP
+server with its URL and API token. On this machine it needs
+`MCP_ALLOW_PRIVATE_IPS=true`. The message menu then offers **Create Sieve rule**:
+the server suggests conditions from the message headers, you pick them and a
+folder, preview the change and where this mail would land, and save it to the
+server. Only the header block is sent, never the body. Saving happens only on
+your click; leave the server's write tools, such as `apply_rule`, switched off
+under Integrations, because switched on they are also offered to the AI agent
+that reads incoming mail.
+
 ## Calendar
 
 IMAP has no calendar, so add one under **Calendars** with **Add CalDAV Calendar**:
