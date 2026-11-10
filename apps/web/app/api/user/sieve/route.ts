@@ -10,5 +10,5 @@ export const GET = withEmailAccount("user/sieve", async (request) =>
 
 async function getData(emailAccountId: string) {
   const server = await getSieveServer(emailAccountId);
-  return { available: !!server, canApply: !!server?.canApply };
+  return { available: !!server, name: server?.displayName ?? null };
 }

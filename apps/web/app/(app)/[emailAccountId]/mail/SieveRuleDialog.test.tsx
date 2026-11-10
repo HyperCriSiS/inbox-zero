@@ -42,7 +42,7 @@ describe("SieveRuleDialog", () => {
       <SieveRuleDialog
         emailAccountId="account-1"
         messageId="message-1"
-        canApply={false}
+        serverName="Sieve Buddy"
         open
         onOpenChange={() => undefined}
       />,

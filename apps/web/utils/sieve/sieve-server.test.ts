@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import prisma from "@/utils/__mocks__/prisma";
 import { createTestLogger } from "@/__tests__/helpers";
-import { SafeError } from "@/utils/error";
-import { callSieveTool, headerBlock, toMessages } from "./sieve-server";
+import {
+  callSieveTool,
+  headerBlock,
+  parseSieveSuggestions,
+  toMessages,
+} from "./sieve-server";
 
 vi.mock("@/utils/prisma");
 
@@ -37,6 +41,54 @@ describe("headerBlock", () => {
 
     expect(headerBlock(source)).toBe("From: a@example.com\r\nSubject: Hi");
   });
+
+  it.each([
+    [
+      "a blank line holding spaces",
+      "From: a@x\r\nSubject: Hi\r\n \r\nSECRET body",
+    ],
+    ["bare CR line ends", "From: a@x\rSubject: Hi\r\rSECRET body"],
+    ["no blank line at all", "From: a@x\r\nSubject: Hi\r\nSECRET body"],
+  ])("leaves the body out with %s", (_case, raw) => {
+    expect(headerBlock(Buffer.from(raw))).not.toContain("SECRET");
+  });
+
+  it("keeps folded header lines", () => {
+    expect(
+      headerBlock(Buffer.from("Subject: a\r\n long one\r\n\r\nbody")),
+    ).toBe("Subject: a\r\n long one");
+  });
+
+  it("reads raw Latin-1 headers", () => {
+    expect(
+      headerBlock(Buffer.from("Subject: Gr\u00fc\u00dfe\r\n\r\n", "latin1")),
+    ).toBe("Subject: Grüße");
+  });
+});
+
+describe("parseSieveSuggestions", () => {
+  it("leaves out a suggestion the app could not send back", () => {
+    expect(
+      parseSieveSuggestions({
+        suggestions: [
+          {
+            id: "list-id",
+            label: "Long list",
+            condition: {
+              kind: "header",
+              header: "list-id",
+              value: "x".repeat(600),
+            },
+          },
+          {
+            id: "from",
+            label: "Sender",
+            condition: { kind: "address", header: "from", value: "a@x" },
+          },
+        ],
+      }).map(({ id }) => id),
+    ).toEqual(["from"]);
+  });
 });
 
 describe("callSieveTool", () => {
@@ -54,27 +106,10 @@ describe("callSieveTool", () => {
     expect(callTool).not.toHaveBeenCalled();
   });
 
-  it("does not save a rule while the apply tool is switched off", async () => {
-    prisma.mcpConnection.findFirst.mockResolvedValue({
-      integration: { name: "custom_sieve" },
-      tools: [{ isEnabled: false }],
-    } as never);
-
-    await expect(
-      callSieveTool({
-        emailAccountId: "a",
-        tool: "apply_rule",
-        args: {},
-        logger,
-      }),
-    ).rejects.toBeInstanceOf(SafeError);
-    expect(callTool).not.toHaveBeenCalled();
-  });
-
   it("passes on what the server refused as plain text", async () => {
     prisma.mcpConnection.findFirst.mockResolvedValue({
+      name: "Sieve Buddy",
       integration: { name: "custom_sieve" },
-      tools: [{ isEnabled: true }],
     } as never);
     callTool.mockResolvedValue({
       isError: true,

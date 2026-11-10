@@ -31,13 +31,13 @@ import { getActionErrorMessage } from "@/utils/error";
 export function SieveRuleDialog({
   emailAccountId,
   messageId,
-  canApply,
+  serverName,
   open,
   onOpenChange,
 }: {
   emailAccountId: string;
   messageId: string;
-  canApply: boolean;
+  serverName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -47,15 +47,14 @@ export function SieveRuleDialog({
         <DialogHeader>
           <DialogTitle>Sieve rule from this mail</DialogTitle>
           <DialogDescription>
-            Your Sieve server files mail like this into a folder from now on.
-            Only the headers of this mail are sent to it.
+            {serverName} files mail like this into a folder from now on. Only
+            the headers of this mail are sent to it.
           </DialogDescription>
         </DialogHeader>
         {open && (
           <Content
             emailAccountId={emailAccountId}
             messageId={messageId}
-            canApply={canApply}
             onSaved={() => onOpenChange(false)}
           />
         )}
@@ -67,14 +66,13 @@ export function SieveRuleDialog({
 function Content({
   emailAccountId,
   messageId,
-  canApply,
   onSaved,
 }: {
   emailAccountId: string;
   messageId: string;
-  canApply: boolean;
   onSaved: () => void;
 }) {
+  const [savedOther, setSavedOther] = useState<string | null>(null);
   const suggest = useAction(suggestSieveRuleAction.bind(null, emailAccountId));
   const plan = useAction(planSieveRuleAction.bind(null, emailAccountId), {
     onError: ({ error }) =>
@@ -84,11 +82,24 @@ function Content({
   });
   const apply = useAction(applySieveRuleAction.bind(null, emailAccountId), {
     onSuccess: ({ data }) => {
-      toastSuccess({
-        description: data?.saved
-          ? `Saved to ${data.target}.`
-          : (data?.reason ?? "Nothing to change."),
-      });
+      if (!data) return;
+      // The server plans again on fresh data when it saves. If that differs
+      // from the preview, what went live stays on screen.
+      if (data.saved && data.diff !== plan.result.data?.diff) {
+        setSavedOther(data.diff);
+        return;
+      }
+      if (data.saved && !data.active) {
+        toastError({
+          description: `Saved to ${data.target}, but the filter is switched off.${data.warning ? ` ${data.warning}` : ""}`,
+        });
+      } else {
+        toastSuccess({
+          description: data.saved
+            ? `Saved to ${data.target}.`
+            : (data.reason ?? "Nothing to change."),
+        });
+      }
       onSaved();
     },
     onError: ({ error }) =>
@@ -210,8 +221,8 @@ function Content({
               )}
             </div>
             {[...preview.errors, ...preview.conflicts, ...preview.notes].map(
-              (line) => (
-                <p key={line} className="text-muted-foreground">
+              (line, index) => (
+                <p key={`${index}-${line}`} className="text-muted-foreground">
                   {line}
                 </p>
               ),
@@ -224,10 +235,23 @@ function Content({
           </div>
         )}
 
+        {savedOther !== null && (
+          <div className="min-w-0 space-y-2 rounded-md border border-destructive p-3">
+            <p>
+              Saved, but the server changed its plan since the preview, for
+              example because the filters changed elsewhere. This is what went
+              live:
+            </p>
+            <pre className="max-h-64 max-w-full overflow-auto rounded bg-muted p-2 text-xs">
+              {savedOther}
+            </pre>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            disabled={!ready}
+            disabled={!ready || savedOther !== null}
             loading={plan.isExecuting}
             onClick={() => plan.execute(input)}
           >
@@ -235,7 +259,10 @@ function Content({
           </Button>
           <Button
             disabled={
-              !ready || !preview || preview.errors.length > 0 || !canApply
+              !ready ||
+              !preview ||
+              preview.errors.length > 0 ||
+              savedOther !== null
             }
             loading={apply.isExecuting}
             onClick={() => apply.execute(input)}
@@ -243,12 +270,6 @@ function Content({
             Save to server
           </Button>
         </div>
-        {!canApply && (
-          <p className="text-muted-foreground">
-            To save, turn on the apply_rule tool of your Sieve server under
-            Integrations.
-          </p>
-        )}
       </div>
     </LoadingContent>
   );

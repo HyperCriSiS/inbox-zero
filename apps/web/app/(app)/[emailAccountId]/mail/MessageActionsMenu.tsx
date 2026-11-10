@@ -159,7 +159,7 @@ export function MessageActionsMenu({
         <SieveRuleDialog
           emailAccountId={emailAccountId}
           messageId={message.id}
-          canApply={sieve.canApply}
+          serverName={sieve.name ?? "Your Sieve server"}
           open={isSieveOpen}
           onOpenChange={setIsSieveOpen}
         />

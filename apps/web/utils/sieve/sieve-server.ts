@@ -9,28 +9,37 @@ import { createMcpTransport } from "@/utils/mcp/transport";
 import prisma from "@/utils/prisma";
 
 // A connected MCP server counts as a Sieve server when it offers these tools,
-// as Sieve Buddy does. Nothing else about the server is assumed.
-const REQUIRED_TOOLS = ["suggest_rule", "plan_rule", "list_folders"];
+// as Sieve Buddy does, and the user left them switched on. Nothing else about
+// the server is assumed.
+const READ_TOOLS = ["suggest_rule", "plan_rule", "list_folders"];
 const APPLY_TOOL = "apply_rule";
 
+/**
+ * Saving needs apply_rule on the server, but never its switch under
+ * Integrations: that switch hands a tool to the AI agent that reads incoming
+ * mail, and a crafted mail must not be able to write the user's filters.
+ * Here every save is the user's own click on a previewed change.
+ */
 export async function getSieveServer(emailAccountId: string) {
   const connection = await prisma.mcpConnection.findFirst({
     where: {
       emailAccountId,
       isActive: true,
-      AND: REQUIRED_TOOLS.map((name) => ({ tools: { some: { name } } })),
+      AND: [
+        ...READ_TOOLS.map((name) => ({
+          tools: { some: { name, isEnabled: true } },
+        })),
+        { tools: { some: { name: APPLY_TOOL } } },
+      ],
     },
-    select: {
-      integration: { select: { name: true } },
-      tools: { where: { name: APPLY_TOOL }, select: { isEnabled: true } },
-    },
+    // Several matching servers: always the same one, the first connected.
+    orderBy: { createdAt: "asc" },
+    select: { name: true, integration: { select: { name: true } } },
   });
   if (!connection) return null;
   return {
+    displayName: connection.name,
     integrationName: connection.integration.name,
-    // Saving changes the user's live mail filters, so it follows the tool's
-    // switch under Integrations like any other write tool.
-    canApply: connection.tools.some((tool) => tool.isEnabled),
   };
 }
 
@@ -49,12 +58,6 @@ export async function callSieveTool({
   if (!server) {
     throw new SafeError("Connect a Sieve server under Integrations first.");
   }
-  if (tool === APPLY_TOOL && !server.canApply) {
-    throw new SafeError(
-      "Turn on the apply_rule tool of your Sieve server under Integrations to save rules.",
-    );
-  }
-
   const integration = await resolveMcpIntegration({
     name: server.integrationName,
     emailAccountId,
@@ -87,26 +90,54 @@ export async function callSieveTool({
   }
 }
 
-/** Mail headers only: the body never leaves the app for a filter suggestion. */
+/**
+ * Mail headers only: the body never leaves the app for a filter suggestion.
+ * Mail from the wild ends its header block in odd ways (a blank line with
+ * spaces, bare CR, no blank line at all), so the block ends at the first line
+ * that is neither a header field nor a folded continuation of one.
+ */
 export function headerBlock(source: Buffer) {
-  const raw = source.subarray(0, MAX_HEADER_BYTES).toString("utf8");
-  const end = raw.search(/\r?\n\r?\n/);
-  return end === -1 ? raw : raw.slice(0, end);
+  const raw = decode(source.subarray(0, MAX_HEADER_BYTES));
+  const lines: string[] = [];
+  for (const line of raw.split(/\r\n|\r|\n/)) {
+    const isField = HEADER_FIELD.test(line);
+    const isFolded = lines.length > 0 && /^[ \t]+\S/.test(line);
+    if (!isField && !isFolded) break;
+    lines.push(line);
+  }
+  return lines.join("\r\n");
 }
 
 const MAX_HEADER_BYTES = 64 * 1024;
+// RFC 5322 field name: printable ASCII except the colon.
+const HEADER_FIELD = /^[!-9;-~]+:/;
+
+// Headers are mostly ASCII. Old mail can carry raw Latin-1, which would turn
+// into replacement characters that no filter can match.
+function decode(bytes: Buffer) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return bytes.toString("latin1");
+  }
+}
 
 // The server's answers are data from another program, so they are reduced to
 // what the dialog shows instead of being passed through.
-export const sieveSuggestionsSchema = z.object({
-  suggestions: z.array(
-    z.object({
-      id: z.string(),
-      label: z.string(),
-      condition: sieveConditionSchema,
-    }),
-  ),
+const sieveSuggestionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  condition: sieveConditionSchema,
 });
+
+/** A suggestion the app could not send back, such as a very long List-Id, is left out. */
+export function parseSieveSuggestions(value: unknown) {
+  const list = z.object({ suggestions: z.array(z.unknown()) }).parse(value);
+  return list.suggestions.flatMap((item) => {
+    const parsed = sieveSuggestionSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
 
 export const sieveFoldersSchema = z.object({
   folders: z.array(z.string()).nullable(),
@@ -132,6 +163,13 @@ export const sievePlanSchema = z.object({
 export const sieveApplySchema = sievePlanSchema.extend({
   saved: z.boolean(),
   reason: z.string().optional(),
+  // Proton can create a filter switched off, and says why.
+  target: z.object({
+    name: z.string(),
+    newFilter: z.boolean().optional(),
+    enabled: z.boolean().optional(),
+  }),
+  warning: z.string().optional(),
 });
 
 export function toMessages(items: unknown[] | undefined) {

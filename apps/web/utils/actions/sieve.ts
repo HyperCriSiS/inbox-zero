@@ -12,7 +12,7 @@ import {
   sieveApplySchema,
   sieveFoldersSchema,
   sievePlanSchema,
-  sieveSuggestionsSchema,
+  parseSieveSuggestions,
   toMessages,
 } from "@/utils/sieve/sieve-server";
 
@@ -51,7 +51,7 @@ export const suggestSieveRuleAction = actionClient
       } = sieveFoldersSchema.parse(folders);
 
       return {
-        suggestions: sieveSuggestionsSchema.parse(suggested).suggestions,
+        suggestions: parseSieveSuggestions(suggested),
         folders: [
           ...new Set([...(system ?? []), ...(list ?? []), ...(labels ?? [])]),
         ],
@@ -102,6 +102,8 @@ export const applySieveRuleAction = actionClient
         ...toPlanView(applied),
         saved: applied.saved,
         reason: applied.reason,
+        active: applied.target.enabled !== false,
+        warning: applied.warning,
       };
     },
   );
