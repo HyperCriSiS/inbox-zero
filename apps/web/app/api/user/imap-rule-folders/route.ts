@@ -20,10 +20,14 @@ async function getData(emailAccountId: string) {
       },
     },
   });
+  const folders = (connection?.mailboxes ?? [])
+    .filter(isRuleFolderCandidate)
+    .map(({ path }) => path);
+  // A chosen folder can be renamed or deleted on the server since.
   return {
-    folders: (connection?.mailboxes ?? [])
-      .filter(isRuleFolderCandidate)
-      .map(({ path }) => path),
-    selected: connection?.ruleFolders ?? [],
+    folders,
+    selected: (connection?.ruleFolders ?? []).filter((path) =>
+      folders.includes(path),
+    ),
   };
 }

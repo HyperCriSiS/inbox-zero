@@ -202,6 +202,24 @@ export function isRuleFolderCandidate(mailbox: {
 }
 
 /**
+ * Sieve can file a copy and keep one in the inbox, and other clients can copy
+ * mail into a chosen folder. That mail was handled where it first arrived, so
+ * a copy in a chosen folder only runs rules when no inbox, Sent or other
+ * chosen folder already holds the same Message-ID.
+ */
+export function isCopyOfHandledMail(
+  indexedCopies: readonly { role: string | null; path: string }[],
+  ruleFolders: readonly string[],
+) {
+  return indexedCopies.some(
+    (copy) =>
+      copy.role === "inbox" ||
+      copy.role === "sent" ||
+      ruleFolders.includes(copy.path),
+  );
+}
+
+/**
  * Mail to oneself shows up in Sent and in the inbox under one Message-ID. A
  * known Message-ID anywhere else proves nothing, because senders choose it,
  * and skipping on it would let a reused ID slip past every rule.

@@ -233,6 +233,21 @@ describe.skipIf(!RUN)("IMAP provider against a real server", () => {
     expect(input?.messageId).toBe((await row("parcel@x")).id);
   });
 
+  test("a copy in a chosen folder of mail that also reached the inbox runs rules once", async () => {
+    const calls = newMailCalls();
+
+    // Sieve `fileinto :copy`: both copies arrive in the same run.
+    await deliver("sievecopy@x");
+    await deliver("sievecopy@x", { folder: "Pakete" });
+    await sync();
+    // Copied into the chosen folder later, by another client.
+    await deliver("sievecopy@x", { folder: "Pakete" });
+    await sync();
+    await sync();
+
+    expect(newMailCalls()).toBe(calls + 1);
+  });
+
   test("an AI outage keeps new mail pending without using up attempts", async () => {
     const callsBefore = newMailCalls();
     vi.mocked(processHistoryItem).mockRejectedValueOnce(

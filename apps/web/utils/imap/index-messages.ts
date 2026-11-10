@@ -107,7 +107,7 @@ export async function resolveThreads(
           rfc822MessageId: true,
           references: true,
           threadId: true,
-          mailbox: { select: { role: true } },
+          mailbox: { select: { role: true, path: true } },
         },
       })
     : [];
