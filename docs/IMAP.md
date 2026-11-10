@@ -91,6 +91,13 @@ itself. Calendars shared with you without write access are never booked into.
   root.
 - Rules and sender filters, such as auto-archive, run in the app when new mail is
   synced. Signatures and contact photos are not available.
+- Rules run on new mail in the inbox. Under Assistant settings, **Rules in other
+  folders** adds your own folders, such as ones the server's Sieve filters sort
+  mail into. Only mail that arrives after you choose a folder runs rules. A copy
+  of mail that also reached the inbox, Sent or another chosen folder runs them
+  only once. Archive in a rule leaves such mail in its folder, while sender
+  filters such as auto-archive still move it to the archive. Mail older than a
+  day, such as old mail moved there in another client, is skipped.
 - Contact suggestions in the composer, with `NEXT_PUBLIC_CONTACTS_ENABLED=true`, come
   from the CardDAV address book of a linked CalDAV calendar, which most servers
   serve with the same login, and from the people you wrote to in Sent. The address

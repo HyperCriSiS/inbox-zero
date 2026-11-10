@@ -2960,6 +2960,7 @@ model ImapConnection {
   capabilities         String[]
   labelStrategy        String    @default("database") // "keywords" | "folders" | "database"
   labels               String[] // Label names for the "keywords" and "database" strategies
+  ruleFolders          String[]  @default([]) // Folder paths whose new mail also runs rules, e.g. folders filled by Sieve
   syncLeaseOwner       String?
   syncLeaseUntil       DateTime?
   lastSyncedAt         DateTime?

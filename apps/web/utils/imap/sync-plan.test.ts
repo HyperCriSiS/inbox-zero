@@ -4,6 +4,7 @@ import {
   diffMailbox,
   getScanStartUid,
   type IndexedMessage,
+  isCopyOfHandledMail,
   isSecondCopyOfOwnMail,
   isSyncableFolder,
   matchMovedMessages,
@@ -215,6 +216,7 @@ describe("shouldEnqueueForRules", () => {
         shouldEnqueueForRules({
           mode: "incremental",
           role,
+          isRuleFolder: false,
           isSecondCopyOfOwnMail: false,
         }),
       ).toBe(true);
@@ -229,7 +231,63 @@ describe("shouldEnqueueForRules", () => {
     ["incremental", "inbox", true],
   ] as const)("skips mode=%s role=%s copy=%s", (mode, role, copy) => {
     expect(
-      shouldEnqueueForRules({ mode, role, isSecondCopyOfOwnMail: copy }),
+      shouldEnqueueForRules({
+        mode,
+        role,
+        isRuleFolder: false,
+        isSecondCopyOfOwnMail: copy,
+      }),
+    ).toBe(false);
+  });
+
+  it("runs rules on new mail in a folder the user chose", () => {
+    expect(
+      shouldEnqueueForRules({
+        mode: "incremental",
+        role: null,
+        isRuleFolder: true,
+        isSecondCopyOfOwnMail: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not replay a chosen folder on its first scan", () => {
+    expect(
+      shouldEnqueueForRules({
+        mode: "baseline",
+        role: null,
+        isRuleFolder: true,
+        isSecondCopyOfOwnMail: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("isCopyOfHandledMail", () => {
+  it("skips a folder copy of mail that reached the inbox, Sent or another chosen folder", () => {
+    expect(
+      isCopyOfHandledMail([{ role: "inbox", path: "INBOX" }], ["Pakete"]),
+    ).toBe(true);
+    expect(
+      isCopyOfHandledMail([{ role: "sent", path: "Sent" }], ["Pakete"]),
+    ).toBe(true);
+    expect(
+      isCopyOfHandledMail(
+        [{ role: null, path: "Termine" }],
+        ["Pakete", "Termine"],
+      ),
+    ).toBe(true);
+  });
+
+  it("runs rules when the only other copy is in an ordinary folder", () => {
+    expect(
+      isCopyOfHandledMail(
+        [
+          { role: null, path: "Projects" },
+          { role: "archive", path: "Archive" },
+        ],
+        ["Pakete"],
+      ),
     ).toBe(false);
   });
 });

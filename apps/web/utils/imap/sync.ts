@@ -23,6 +23,7 @@ import {
   diffMailbox,
   getScanStartUid,
   type IndexedMessage,
+  isCopyOfHandledMail,
   isSecondCopyOfOwnMail,
   isSyncableFolder,
   matchMovedMessages,
@@ -182,6 +183,7 @@ async function syncIndex({
     where: { emailAccountId },
     select: {
       id: true,
+      ruleFolders: true,
       mailboxes: {
         select: {
           id: true,
@@ -250,6 +252,7 @@ async function syncIndex({
     scans,
     orphaned,
     removedMailboxIds: removedMailboxes.map((mailbox) => mailbox.id),
+    ruleFolders: connection.ruleFolders,
     features: detectFeatures({
       capabilities: client.capabilities.keys(),
       permanentFlags,
@@ -357,6 +360,7 @@ async function commitScans({
   scans,
   orphaned,
   removedMailboxIds,
+  ruleFolders,
   features,
   capabilities,
 }: {
@@ -365,6 +369,7 @@ async function commitScans({
   scans: MailboxScan[];
   orphaned: IndexedMessage[];
   removedMailboxIds: string[];
+  ruleFolders: string[];
   features: ReturnType<typeof detectFeatures>;
   capabilities: string[];
 }) {
@@ -387,11 +392,14 @@ async function commitScans({
     })),
     deleted.map((row) => row.id),
   );
-  const rolesOfIndexedCopies = new Map<string, (string | null)[]>();
+  const indexedCopies = new Map<
+    string,
+    { role: string | null; path: string }[]
+  >();
   for (const { rfc822MessageId, mailbox } of existing) {
     if (!rfc822MessageId) continue;
-    const roles = rolesOfIndexedCopies.get(rfc822MessageId) ?? [];
-    rolesOfIndexedCopies.set(rfc822MessageId, [...roles, mailbox.role]);
+    const copies = indexedCopies.get(rfc822MessageId) ?? [];
+    indexedCopies.set(rfc822MessageId, [...copies, mailbox]);
   }
   // The client groups by thread, so absorbed messages must be reported again.
   const mergedMessages = merges.size
@@ -421,17 +429,36 @@ async function commitScans({
     };
   });
 
-  const syncItems = rows
-    .filter(({ message, scan }) =>
-      shouldEnqueueForRules({
-        mode: scan.mode,
-        role: scan.role,
-        isSecondCopyOfOwnMail: isSecondCopyOfOwnMail(
+  const enqueued = rows.filter(({ message, scan }) => {
+    const copies = indexedCopies.get(message.rfc822MessageId ?? "") ?? [];
+    const isRuleFolder = !scan.role && ruleFolders.includes(scan.path);
+    return shouldEnqueueForRules({
+      mode: scan.mode,
+      role: scan.role,
+      isRuleFolder,
+      isSecondCopyOfOwnMail:
+        isSecondCopyOfOwnMail(
           scan.role,
-          rolesOfIndexedCopies.get(message.rfc822MessageId ?? "") ?? [],
-        ),
-      }),
-    )
+          copies.map(({ role }) => role),
+        ) ||
+        (isRuleFolder && isCopyOfHandledMail(copies, ruleFolders)),
+    });
+  });
+  // Copies arriving in the same run: the inbox or Sent copy wins, then the
+  // first chosen folder.
+  const intakeIds = new Set(
+    enqueued.flatMap(({ message, scan }) =>
+      scan.role && message.rfc822MessageId ? [message.rfc822MessageId] : [],
+    ),
+  );
+  const syncItems = enqueued
+    .filter(({ message, scan }) => {
+      const id = message.rfc822MessageId;
+      if (scan.role || !id) return true;
+      if (intakeIds.has(id)) return false;
+      intakeIds.add(id);
+      return true;
+    })
     .map(({ row }) => ({ connectionId, messageId: row.id }));
 
   await prisma.$transaction([
