@@ -161,7 +161,7 @@ export function MessageActionsMenu({
           {sieve?.available && (
             <DropdownMenuItem onSelect={() => setIsSieveOpen(true)}>
               <FilterIcon className="mr-2 size-4" />
-              Create Sieve rule
+              <Trans>Create Sieve rule</Trans>
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>

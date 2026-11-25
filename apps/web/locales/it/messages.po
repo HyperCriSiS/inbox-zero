@@ -4218,6 +4218,10 @@ msgstr "Crea una regola per il mittente"
 msgid "Create rules"
 msgstr "Crea regole"
 
+#: app/(app)/[emailAccountId]/mail/MessageActionsMenu.tsx
+msgid "Create Sieve rule"
+msgstr "Crea regola Sieve"
+
 #: app/(app)/organization/[organizationId]/rules/OrgRules.tsx
 msgid "Create your first rule"
 msgstr "Crea la tua prima regola"
@@ -10916,6 +10920,10 @@ msgstr "Promemoria se nessuna risposta entro {0}"
 msgid "Remove"
 msgstr "Rimuovi"
 
+#: components/PlanBadge.tsx
+msgid "Remove \"{label}\""
+msgstr "Rimuovi \"{label}\""
+
 #. placeholder {0}: attachment.filename
 #. placeholder {0}: item.value
 #. placeholder {0}: participant.name
@@ -10932,6 +10940,10 @@ msgstr "Rimuovi {emailAddress}"
 #: app/(app)/[emailAccountId]/mail/MailLabelChip.tsx
 msgid "Remove {name} label"
 msgstr "Rimuovi l'etichetta {name}"
+
+#: utils/action-display-messages.ts
+msgid "Remove {quotedLabelName}"
+msgstr "Rimuovi {quotedLabelName}"
 
 #: app/(app)/[emailAccountId]/assistant/knowledge/DraftDocsSites.tsx
 msgid "Remove {url}"
@@ -10970,6 +10982,13 @@ msgstr "Rimuovi l'invito"
 #: app/(app)/[emailAccountId]/settings/DeleteSection.tsx
 msgid "Remove just one account instead"
 msgstr "Rimuovi invece un solo account"
+
+#: app/(app)/[emailAccountId]/assistant/AvailableActionsPanel.tsx
+#: components/PlanBadge.tsx
+#: utils/action-display-messages.ts
+#: utils/action-display.tsx
+msgid "Remove label"
+msgstr "Rimuovi etichetta"
 
 #: app/(app)/[emailAccountId]/settings/McpSection.tsx
 msgid "Remove optional access below, or disconnect to remove all access. To add permissions, reconnect from the application and approve the new access."

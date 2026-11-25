@@ -4218,6 +4218,10 @@ msgstr "보낸 사람 규칙 만들기"
 msgid "Create rules"
 msgstr "규칙 만들기"
 
+#: app/(app)/[emailAccountId]/mail/MessageActionsMenu.tsx
+msgid "Create Sieve rule"
+msgstr "Sieve 규칙 만들기"
+
 #: app/(app)/organization/[organizationId]/rules/OrgRules.tsx
 msgid "Create your first rule"
 msgstr "첫 규칙 만들기"
@@ -10916,6 +10920,10 @@ msgstr "{0}까지 답장이 없으면 알림"
 msgid "Remove"
 msgstr "제거"
 
+#: components/PlanBadge.tsx
+msgid "Remove \"{label}\""
+msgstr "\"{label}\" 제거"
+
 #. placeholder {0}: attachment.filename
 #. placeholder {0}: item.value
 #. placeholder {0}: participant.name
@@ -10932,6 +10940,10 @@ msgstr "{emailAddress} 제거"
 #: app/(app)/[emailAccountId]/mail/MailLabelChip.tsx
 msgid "Remove {name} label"
 msgstr "{name} 라벨 제거"
+
+#: utils/action-display-messages.ts
+msgid "Remove {quotedLabelName}"
+msgstr "{quotedLabelName} 제거"
 
 #: app/(app)/[emailAccountId]/assistant/knowledge/DraftDocsSites.tsx
 msgid "Remove {url}"
@@ -10970,6 +10982,13 @@ msgstr "초대 제거"
 #: app/(app)/[emailAccountId]/settings/DeleteSection.tsx
 msgid "Remove just one account instead"
 msgstr "계정 하나만 대신 제거"
+
+#: app/(app)/[emailAccountId]/assistant/AvailableActionsPanel.tsx
+#: components/PlanBadge.tsx
+#: utils/action-display-messages.ts
+#: utils/action-display.tsx
+msgid "Remove label"
+msgstr "라벨 제거"
 
 #: app/(app)/[emailAccountId]/settings/McpSection.tsx
 msgid "Remove optional access below, or disconnect to remove all access. To add permissions, reconnect from the application and approve the new access."

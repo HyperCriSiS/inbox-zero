@@ -4218,6 +4218,10 @@ msgstr "送信者のルールを作成"
 msgid "Create rules"
 msgstr "ルールを作成"
 
+#: app/(app)/[emailAccountId]/mail/MessageActionsMenu.tsx
+msgid "Create Sieve rule"
+msgstr "Sieve ルールを作成"
+
 #: app/(app)/organization/[organizationId]/rules/OrgRules.tsx
 msgid "Create your first rule"
 msgstr "最初のルールを作成"
@@ -10916,6 +10920,10 @@ msgstr "{0}までに返信がない場合のリマインダー"
 msgid "Remove"
 msgstr "削除"
 
+#: components/PlanBadge.tsx
+msgid "Remove \"{label}\""
+msgstr "\"{label}\" を削除"
+
 #. placeholder {0}: attachment.filename
 #. placeholder {0}: item.value
 #. placeholder {0}: participant.name
@@ -10932,6 +10940,10 @@ msgstr "{emailAddress}を削除"
 #: app/(app)/[emailAccountId]/mail/MailLabelChip.tsx
 msgid "Remove {name} label"
 msgstr "ラベル「{name}」を削除"
+
+#: utils/action-display-messages.ts
+msgid "Remove {quotedLabelName}"
+msgstr "{quotedLabelName} を削除"
 
 #: app/(app)/[emailAccountId]/assistant/knowledge/DraftDocsSites.tsx
 msgid "Remove {url}"
@@ -10970,6 +10982,13 @@ msgstr "招待を削除"
 #: app/(app)/[emailAccountId]/settings/DeleteSection.tsx
 msgid "Remove just one account instead"
 msgstr "代わりに1つのアカウントだけを削除"
+
+#: app/(app)/[emailAccountId]/assistant/AvailableActionsPanel.tsx
+#: components/PlanBadge.tsx
+#: utils/action-display-messages.ts
+#: utils/action-display.tsx
+msgid "Remove label"
+msgstr "ラベルを削除"
 
 #: app/(app)/[emailAccountId]/settings/McpSection.tsx
 msgid "Remove optional access below, or disconnect to remove all access. To add permissions, reconnect from the application and approve the new access."

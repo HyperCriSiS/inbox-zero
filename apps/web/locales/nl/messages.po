@@ -4218,6 +4218,10 @@ msgstr "Regel voor afzender aanmaken"
 msgid "Create rules"
 msgstr "Regels aanmaken"
 
+#: app/(app)/[emailAccountId]/mail/MessageActionsMenu.tsx
+msgid "Create Sieve rule"
+msgstr "Sieve-regel maken"
+
 #: app/(app)/organization/[organizationId]/rules/OrgRules.tsx
 msgid "Create your first rule"
 msgstr "Maak je eerste regel aan"
@@ -10916,6 +10920,10 @@ msgstr "Herinnering als er geen antwoord is vóór {0}"
 msgid "Remove"
 msgstr "Verwijderen"
 
+#: components/PlanBadge.tsx
+msgid "Remove \"{label}\""
+msgstr "\"{label}\" verwijderen"
+
 #. placeholder {0}: attachment.filename
 #. placeholder {0}: item.value
 #. placeholder {0}: participant.name
@@ -10932,6 +10940,10 @@ msgstr "{emailAddress} verwijderen"
 #: app/(app)/[emailAccountId]/mail/MailLabelChip.tsx
 msgid "Remove {name} label"
 msgstr "Label {name} verwijderen"
+
+#: utils/action-display-messages.ts
+msgid "Remove {quotedLabelName}"
+msgstr "{quotedLabelName} verwijderen"
 
 #: app/(app)/[emailAccountId]/assistant/knowledge/DraftDocsSites.tsx
 msgid "Remove {url}"
@@ -10970,6 +10982,13 @@ msgstr "Uitnodiging verwijderen"
 #: app/(app)/[emailAccountId]/settings/DeleteSection.tsx
 msgid "Remove just one account instead"
 msgstr "Verwijder in plaats daarvan slechts één account"
+
+#: app/(app)/[emailAccountId]/assistant/AvailableActionsPanel.tsx
+#: components/PlanBadge.tsx
+#: utils/action-display-messages.ts
+#: utils/action-display.tsx
+msgid "Remove label"
+msgstr "Label verwijderen"
 
 #: app/(app)/[emailAccountId]/settings/McpSection.tsx
 msgid "Remove optional access below, or disconnect to remove all access. To add permissions, reconnect from the application and approve the new access."

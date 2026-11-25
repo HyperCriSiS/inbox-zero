@@ -376,6 +376,32 @@ describe("createRuleSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts MOVE_FOLDER with folderName on IMAP, which has real folders", () => {
+    const result = createRuleSchema("imap").safeParse(
+      buildRule({
+        type: ActionType.MOVE_FOLDER,
+        fields: { folderName: "Finance" },
+        delayInMinutes: null,
+      }),
+    );
+
+    expect(result.success).toBe(true);
+  });
+
+  it("requires the label for REMOVE_LABEL", () => {
+    const parse = (fields: Record<string, string>) =>
+      createRuleSchema(provider).safeParse(
+        buildRule({
+          type: ActionType.REMOVE_LABEL,
+          fields,
+          delayInMinutes: null,
+        }),
+      );
+
+    expect(parse({}).success).toBe(false);
+    expect(parse({ label: "To review" }).success).toBe(true);
+  });
+
   it("rejects structurally invalid static.from values", () => {
     const result = createRuleSchema(provider).safeParse({
       ...buildRule({
