@@ -1,5 +1,6 @@
 "use client";
 
+import { useLingui } from "@lingui/react/macro";
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -18,6 +19,7 @@ import {
   MailsIcon,
   SlidersHorizontalIcon,
 } from "lucide-react";
+import { env } from "@/env";
 import type { Command } from "@/lib/commands/types";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useRules } from "@/hooks/useRules";
@@ -39,6 +41,7 @@ export function useCommandPaletteCommands({
 }: {
   enabled?: boolean;
 } = {}) {
+  const { i18n, t } = useLingui();
   const router = useRouter();
   const { openSettings } = useSettingsDialog();
   const { emailAccountId, provider } = useAccount();
@@ -54,8 +57,8 @@ export function useCommandPaletteCommands({
     const generalSettingsCommands: Command[] = [
       {
         id: "settings-general",
-        label: "Settings",
-        description: "General account settings",
+        label: t`Settings`,
+        description: t`General account settings`,
         icon: SettingsIcon,
         section: "settings",
         priority: 1,
@@ -64,63 +67,81 @@ export function useCommandPaletteCommands({
           openSettings();
         },
       },
-      {
-        id: "settings-mail-setup",
-        label: "Mail setup",
-        description: "Layout, tabs and bundles",
-        icon: SlidersHorizontalIcon,
-        section: "settings",
-        priority: 2,
-        keywords: ["mail onboarding", "setup", "layout", "tabs", "split"],
-        action: () => router.push(prefixPath(emailAccountId, "/mail?setup=1")),
-      },
+      ...(env.NEXT_PUBLIC_MAIL_APP_ENABLED
+        ? [
+            {
+              id: "settings-mail-setup",
+              label: t`Mail setup`,
+              description: t`Layout, tabs and bundles`,
+              icon: SlidersHorizontalIcon,
+              section: "settings" as const,
+              priority: 2,
+              keywords: ["mail onboarding", "setup", "layout", "tabs", "split"],
+              action: () =>
+                router.push(prefixPath(emailAccountId, "/mail?setup=1")),
+            },
+          ]
+        : []),
     ];
     // Kept even while a conversation is selected: jumping to another mailbox
     // is as likely then as from anywhere else.
-    const mailboxCommands: Command[] = MAILBOX_ITEMS.map((item, index) => ({
-      id: `nav-mailbox-${item.type}`,
-      label: `Go to ${item.name}`,
-      icon: item.Icon,
-      section: "navigation",
-      priority: index + 30,
-      keywords: [item.name.toLowerCase(), "mailbox", "folder"],
-      action: () =>
-        router.push(
-          prefixPath(
-            emailAccountId,
-            getMailNavPath({ kind: "type", type: item.type }),
+    const mailboxItems = env.NEXT_PUBLIC_MAIL_APP_ENABLED ? MAILBOX_ITEMS : [];
+    const mailboxCommands: Command[] = mailboxItems.map((item, index) => {
+      const mailbox = i18n._(item.label);
+      return {
+        id: `nav-mailbox-${item.type}`,
+        label: t`Go to ${mailbox}`,
+        icon: item.Icon,
+        section: "navigation",
+        priority: index + 30,
+        keywords: [item.name.toLowerCase(), "mailbox", "folder"],
+        action: () =>
+          router.push(
+            prefixPath(
+              emailAccountId,
+              getMailNavPath({ kind: "type", type: item.type }),
+            ),
           ),
-        ),
-    }));
+      };
+    });
     if (!enabled) return [...mailboxCommands, ...generalSettingsCommands];
 
     const navigationItems = [
-      {
-        name: "Mail",
-        href: prefixPath(emailAccountId, "/mail"),
-        icon: InboxIcon,
-        keywords: ["mail", "inbox", "email"],
-      },
+      ...(env.NEXT_PUBLIC_MAIL_APP_ENABLED
+        ? [
+            {
+              name: "Mail",
+              label: t`Go to Mail`,
+              href: prefixPath(emailAccountId, "/mail"),
+              icon: InboxIcon,
+              keywords: ["mail", "inbox", "email"],
+            },
+          ]
+        : []),
       {
         name: "Assistant",
+        label: t`Go to Assistant`,
         href: prefixPath(emailAccountId, "/automation"),
         icon: SparklesIcon,
         keywords: ["ai", "assistant", "rules", "auto"],
       },
       {
         name: "Bulk Unsubscribe",
+        label: t`Go to Bulk Unsubscribe`,
         href: prefixPath(emailAccountId, "/bulk-unsubscribe"),
         icon: MailsIcon,
         keywords: ["unsubscribe", "newsletters", "spam"],
       },
       {
         name: "Analytics",
+        label: t`Go to Analytics`,
         href: prefixPath(emailAccountId, "/stats"),
         icon: BarChartBigIcon,
         keywords: ["statistics", "charts", "data"],
       },
       {
         name: "Calendars",
+        label: t`Go to Calendars`,
         href: prefixPath(emailAccountId, "/calendars"),
         icon: CalendarIcon,
         keywords: ["calendar", "scheduling", "meetings"],
@@ -129,6 +150,7 @@ export function useCommandPaletteCommands({
         ? [
             {
               name: "Integrations",
+              label: t`Go to Integrations`,
               href: prefixPath(emailAccountId, "/integrations"),
               icon: ZapIcon,
               keywords: ["integrations", "apps", "connect"],
@@ -139,6 +161,7 @@ export function useCommandPaletteCommands({
         ? [
             {
               name: "Meeting Briefs",
+              label: t`Go to Meeting Briefs`,
               href: prefixPath(emailAccountId, "/briefs"),
               icon: FileTextIcon,
               keywords: ["briefs", "meeting", "summaries"],
@@ -149,6 +172,7 @@ export function useCommandPaletteCommands({
         ? [
             {
               name: "Deep Clean",
+              label: t`Go to Deep Clean`,
               href: prefixPath(emailAccountId, "/clean"),
               icon: BrushIcon,
               keywords: ["clean", "organize", "tidy"],
@@ -157,6 +181,7 @@ export function useCommandPaletteCommands({
         : []),
       {
         name: "Cold Email Blocker",
+        label: t`Go to Cold Email Blocker`,
         href: prefixPath(emailAccountId, "/cold-email-blocker"),
         icon: ShieldCheckIcon,
         keywords: ["block", "cold", "spam", "filter"],
@@ -165,7 +190,7 @@ export function useCommandPaletteCommands({
     const navigationCommands: Command[] = navigationItems.map(
       (item, index) => ({
         id: `nav-${item.name.toLowerCase().replace(/\s+/g, "-")}`,
-        label: `Go to ${item.name}`,
+        label: item.label,
         icon: item.icon,
         section: "navigation",
         priority: index + 10,
@@ -177,8 +202,8 @@ export function useCommandPaletteCommands({
     const settingsCommands: Command[] = [
       {
         id: "settings-assistant",
-        label: "Assistant Settings",
-        description: "Configure AI assistant behavior",
+        label: t`Assistant Settings`,
+        description: t`Configure AI assistant behavior`,
         icon: SparklesIcon,
         section: "settings",
         priority: 2,
@@ -188,8 +213,8 @@ export function useCommandPaletteCommands({
       },
       {
         id: "settings-usage",
-        label: "Usage",
-        description: "View usage statistics",
+        label: t`Usage`,
+        description: t`View usage statistics`,
         icon: BarChartBigIcon,
         section: "settings",
         priority: 3,
@@ -198,8 +223,8 @@ export function useCommandPaletteCommands({
       },
       {
         id: "settings-organization",
-        label: "Organization",
-        description: "Manage organization settings",
+        label: t`Organization`,
+        description: t`Manage organization settings`,
         icon: UsersIcon,
         section: "settings",
         priority: 4,
@@ -208,8 +233,8 @@ export function useCommandPaletteCommands({
       },
       {
         id: "manage-accounts",
-        label: "Manage Accounts",
-        description: "Add or switch email accounts",
+        label: t`Manage Accounts`,
+        description: t`Add or switch email accounts`,
         icon: UserIcon,
         section: "settings",
         priority: 5,
@@ -221,7 +246,7 @@ export function useCommandPaletteCommands({
     const ruleCommands: Command[] = (rulesData ?? []).map((rule, index) => ({
       id: `rule-${rule.id}`,
       label: rule.name,
-      description: rule.instructions || "View rule",
+      description: rule.instructions || t`View rule`,
       icon: ScrollTextIcon,
       section: "rules" as const,
       priority: index + 1,
@@ -247,6 +272,8 @@ export function useCommandPaletteCommands({
     showCleaner,
     showIntegrations,
     showMeetingBriefs,
+    i18n,
+    t,
   ]);
 
   return {

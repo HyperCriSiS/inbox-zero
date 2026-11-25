@@ -1,5 +1,8 @@
 "use client";
 
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { isThreadStarred } from "@/app/(app)/[emailAccountId]/mail/star-state";
 import * as React from "react";
 import {
@@ -26,6 +29,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { useComposeModal } from "@/providers/ComposeModalProvider";
+import { env } from "@/env";
 import {
   commandPaletteOpenAtom,
   feedbackDialogOpenAtom,
@@ -66,12 +70,12 @@ const SECTION_ORDER: CommandSection[] = [
   "settings",
 ];
 
-const SECTION_LABELS: Record<CommandSection, string> = {
-  actions: "Actions",
-  navigation: "Navigation",
-  rules: "Rules",
-  accounts: "Switch Account",
-  settings: "Settings",
+const SECTION_LABELS: Record<CommandSection, MessageDescriptor> = {
+  actions: msg`Actions`,
+  navigation: msg`Navigation`,
+  rules: msg`Rules`,
+  accounts: msg`Switch Account`,
+  settings: msg`Settings`,
 };
 
 /** Still shown in ⌘K when a conversation is selected and mail actions take over. */
@@ -127,6 +131,7 @@ function CommandPaletteContent({
   mailCommandContext: MailCommandContext | null;
   senderCommandContext: SenderCommandContext | null;
 }) {
+  const { i18n, t } = useLingui();
   const [open, setOpen] = useAtom(commandPaletteOpenAtom);
   const setShortcutsOpen = useSetAtom(shortcutsDialogOpenAtom);
   const setFeedbackOpen = useSetAtom(feedbackDialogOpenAtom);
@@ -156,15 +161,15 @@ function CommandPaletteContent({
       setSearch("");
       setOpen((wasOpen) => !wasOpen);
     },
-    compose: onOpenComposeModal,
+    compose: env.NEXT_PUBLIC_MAIL_APP_ENABLED ? onOpenComposeModal : undefined,
     help: () => setShortcutsOpen(true),
     archive: threadId
       ? async () => {
           if (displayedThread?.thread.id !== threadId) {
             toastError({
               description: isDisplayedThreadLoading
-                ? "Email is still loading"
-                : "Email is unavailable",
+                ? t`Email is still loading`
+                : t`Email is unavailable`,
             });
             return;
           }
@@ -183,14 +188,14 @@ function CommandPaletteContent({
               toastError({
                 description:
                   admissionRejectionCopy(admission.code) ??
-                  "Couldn't queue archiving this email",
+                  t`Couldn't queue archiving this email`,
               });
               return;
             }
             showEmail(null);
           } catch {
             toastError({
-              description: "Couldn't queue archiving this email",
+              description: t`Couldn't queue archiving this email`,
             });
           }
         }
@@ -200,8 +205,8 @@ function CommandPaletteContent({
           if (displayedThread?.thread.id !== threadId) {
             toastError({
               description: isDisplayedThreadLoading
-                ? "Email is still loading"
-                : "Email is unavailable",
+                ? t`Email is still loading`
+                : t`Email is unavailable`,
             });
             return;
           }
@@ -223,12 +228,12 @@ function CommandPaletteContent({
               toastError({
                 description:
                   admissionRejectionCopy(admission.code) ??
-                  "Couldn’t update the star for this email",
+                  t`Couldn’t update the star for this email`,
               });
             }
           } catch {
             toastError({
-              description: "Couldn’t update the star for this email",
+              description: t`Couldn’t update the star for this email`,
             });
           }
         }
@@ -258,7 +263,7 @@ function CommandPaletteContent({
 
   useShortcuts(shortcutHandlers);
 
-  const shortcutCommands = buildShortcutPaletteCommands(shortcutHandlers);
+  const shortcutCommands = buildShortcutPaletteCommands(shortcutHandlers, i18n);
   const mailCommands = mailCommandContext
     ? buildMailCommandPalette({
         actions: {
@@ -278,6 +283,7 @@ function CommandPaletteContent({
           trash: mailCommandContext.actions.trash,
           openExternal: mailCommandContext.actions.openExternal,
           translate: mailCommandContext.actions.translate,
+          copyEmail: mailCommandContext.actions.copyEmail,
           comment: mailCommandContext.actions.comment,
           toggleAutoArchive: senderCommandContext?.toggleAutoArchive,
           unsubscribe: senderCommandContext?.unsubscribe,
@@ -291,6 +297,7 @@ function CommandPaletteContent({
         unsubscribeLabel: senderCommandContext?.unsubscribeLabel,
         openExternalLabel: mailCommandContext.openExternalLabel,
         targetCount: mailCommandContext.targetCount,
+        i18n,
       })
     : [];
 
@@ -299,6 +306,7 @@ function CommandPaletteContent({
     allCommands = buildSnoozeCommandPalette({
       onSnooze: mailCommandContext.actions.snooze,
       query: search,
+      i18n,
     });
   } else {
     const actionCommands = mailCommandContext
@@ -310,12 +318,12 @@ function CommandPaletteContent({
         ]
       : shortcutCommands;
     const themeCommands: Command[] = [
-      { theme: "dark", label: "Dark", icon: MoonIcon },
-      { theme: "light", label: "Light", icon: SunIcon },
-      { theme: "system", label: "System", icon: MonitorIcon },
+      { theme: "dark", label: t`Set Theme: Dark`, icon: MoonIcon },
+      { theme: "light", label: t`Set Theme: Light`, icon: SunIcon },
+      { theme: "system", label: t`Set Theme: System`, icon: MonitorIcon },
     ].map(({ theme, label, icon }) => ({
       id: `theme-${theme}`,
-      label: `Set Theme: ${label}`,
+      label,
       icon,
       section: "settings",
       keywords: ["theme", "appearance", "mode", theme],
@@ -325,7 +333,7 @@ function CommandPaletteContent({
       ...actionCommands,
       {
         id: "switch-accounts",
-        label: "Switch accounts",
+        label: t`Switch accounts`,
         icon: UsersIcon,
         section: "accounts",
         keywords: ["switch", "accounts", "email", "inbox"],
@@ -338,7 +346,7 @@ function CommandPaletteContent({
     if (feedbackEnabled) {
       allCommands.push({
         id: "send-feedback",
-        label: "Send feedback",
+        label: t`Send feedback`,
         icon: MessageSquarePlusIcon,
         section: "settings",
         keywords: ["feedback", "bug", "report", "suggestion", "idea"],
@@ -395,9 +403,9 @@ function CommandPaletteContent({
         autoFocus
         placeholder={
           {
-            root: "Type a command or search...",
-            snooze: "When should it return? Try Friday at 3pm",
-            accounts: "Search accounts...",
+            root: t`Type a command or search...`,
+            snooze: t`When should it return? Try Friday at 3pm`,
+            accounts: t`Search accounts...`,
           }[page]
         }
         value={search}
@@ -421,8 +429,8 @@ function CommandPaletteContent({
           <>
             <CommandEmpty>
               {page === "snooze"
-                ? "Try a date like tomorrow at 3pm."
-                : "No results found."}
+                ? t`Try a date like tomorrow at 3pm.`
+                : t`No results found.`}
             </CommandEmpty>
             {SECTION_ORDER.map((section, index) => {
               const sectionCommands = groupedCommands[section];
@@ -440,8 +448,8 @@ function CommandPaletteContent({
                   <CommandGroup
                     heading={
                       page === "snooze" && section === "actions"
-                        ? "Snooze until"
-                        : SECTION_LABELS[section]
+                        ? t`Snooze until`
+                        : i18n._(SECTION_LABELS[section])
                     }
                   >
                     {sectionCommands.map((command) => (

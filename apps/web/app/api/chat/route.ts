@@ -4,6 +4,7 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  pruneMessages,
   type UIMessage,
 } from "ai";
 import { withEmailAccount } from "@/utils/middleware";
@@ -25,6 +26,7 @@ import {
   buildCompactionSummaryMessage,
   extractMemories,
 } from "@/utils/ai/assistant/compact";
+import { toChatActionTotals } from "@/utils/ai/assistant/chat-action-totals";
 import { getInboxStatsForChatContext } from "@/utils/ai/assistant/get-inbox-stats-for-chat-context";
 import { formatUtcDate } from "@/utils/date";
 import {
@@ -228,12 +230,12 @@ export const POST = withEmailAccount("chat", async (request) => {
       ...(hiddenInlineActionMessage ? [hiddenInlineActionMessage] : []),
     ];
 
-    const conversationModelMessages = await convertToModelMessages(
+    const conversationModelMessages = await convertChatHistoryToModelMessages(
       conversationUiMessages,
     );
 
     let modelMessages = hiddenInlineActionMessage
-      ? await convertToModelMessages(uiMessages)
+      ? await convertChatHistoryToModelMessages(uiMessages)
       : conversationModelMessages;
 
     if (latestCompaction) {
@@ -252,6 +254,7 @@ export const POST = withEmailAccount("chat", async (request) => {
           recentUserMessageCount,
         } = await compactMessages({
           messages: modelMessages,
+          actionTotals: toChatActionTotals(chat.actionTotals),
           user,
           logger: request.logger,
         });
@@ -549,6 +552,7 @@ async function createNewChat({
       include: {
         messages: { orderBy: { createdAt: "asc" } },
         compactions: { orderBy: { createdAt: "desc" }, take: 1 },
+        actionTotals: { select: { action: true, count: true } },
       },
     });
     logger.info("New chat created", { chatId: newChat.id, emailAccountId });
@@ -565,6 +569,7 @@ async function getChatWithCompactions(chatId: string) {
     include: {
       messages: { orderBy: { createdAt: "asc" } },
       compactions: { orderBy: { createdAt: "desc" }, take: 1 },
+      actionTotals: { select: { action: true, count: true } },
     },
   });
 }
@@ -737,4 +742,12 @@ function removeIncompleteToolParts(message: UIMessage): UIMessage {
         ),
     ),
   };
+}
+
+async function convertChatHistoryToModelMessages(messages: UIMessage[]) {
+  // Rebuilt context can invalidate the signatures on previous turns' reasoning.
+  return pruneMessages({
+    messages: await convertToModelMessages(messages),
+    reasoning: "all",
+  });
 }

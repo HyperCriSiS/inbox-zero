@@ -8,6 +8,7 @@ import { sendEmailBody } from "@/utils/types/mail";
 import { actionClient } from "@/utils/actions/safe-action";
 import { DraftNotFoundError, SafeError } from "@/utils/error";
 import { createEmailProvider } from "@/utils/email/provider";
+import { completeDraftRecipients } from "@/utils/email/draft-recipients";
 import { sendHtmlEmailWithOpenTracking } from "@/utils/email/sent-message-open/sent-message-open.server";
 import {
   deleteMailboxItemBody,
@@ -468,7 +469,12 @@ export const updateDraftAction = actionClient
         ...content
       } = parsedInput;
       try {
-        await provider.updateDraft(draftId, content);
+        await provider.updateDraft(draftId, {
+          ...content,
+          to: completeDraftRecipients(content.to),
+          cc: completeDraftRecipients(content.cc),
+          bcc: completeDraftRecipients(content.bcc),
+        });
       } catch (error) {
         if (error instanceof DraftNotFoundError)
           return { status: "missing" as const };
@@ -493,9 +499,7 @@ function assertMailboxItemMutationSupported({
   provider: string;
 }) {
   if (kind === "folder" && !supportsFolders(provider)) {
-    throw new SafeError(
-      "Folder actions are not available for this account.",
-    );
+    throw new SafeError("Folder actions are not available for this account.");
   }
 }
 

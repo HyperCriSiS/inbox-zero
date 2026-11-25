@@ -422,7 +422,19 @@ export async function migrateMailbox(
   await migrateMessageSearchIndex(tx);
   await migrateEmptyMeetingInvitationBodies(tx);
   await migrateContactSuggestions(tx);
+  await migrateSyncStreamRetryDeadline(tx);
   await migrateImapAccounts(tx);
+}
+
+async function migrateSyncStreamRetryDeadline(tx: SqlTransaction) {
+  const applied = await tx.query(
+    "SELECT 1 FROM schema_migrations WHERE id = 13",
+  );
+  if (applied.length) return;
+  await tx.exec("ALTER TABLE sync_streams ADD COLUMN retry_at_ms INTEGER");
+  await tx.execute(
+    "INSERT INTO schema_migrations(id, name) VALUES (13, '0013-sync-stream-retry-deadline')",
+  );
 }
 
 // Delta sync once stored a meeting invitation's flag without its body. Dropping
@@ -445,7 +457,9 @@ export async function migrateEmptyMeetingInvitationBodies(tx: SqlTransaction) {
 }
 
 async function migrateImapAccounts(tx: SqlTransaction) {
-  if ((await tx.query("SELECT 1 FROM schema_migrations WHERE id = 9001")).length)
+  if (
+    (await tx.query("SELECT 1 FROM schema_migrations WHERE id = 9001")).length
+  )
     return;
   const [table] = await tx.query(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'accounts'",

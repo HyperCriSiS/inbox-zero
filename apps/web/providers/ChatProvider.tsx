@@ -1,6 +1,9 @@
 "use client";
 
 import { useChat as useAiChat } from "@ai-sdk/react";
+import type { I18n } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import { DefaultChatTransport } from "ai";
 import { parseAsString, useQueryState } from "nuqs";
 import {
@@ -44,11 +47,10 @@ import {
 } from "@/utils/ai/assistant/mail-screen-action";
 
 const logger = createClientLogger("assistant-chat");
+const SAVE_POLL_MS = 1000;
 
-const CHAT_SEND_FAILED_MESSAGE =
-  "We couldn't send your message. Please try again.";
-const CHAT_ACCOUNT_MISMATCH_MESSAGE =
-  "That chat belongs to another email account, so we started a new one. Send your message again.";
+const CHAT_SEND_FAILED_MESSAGE = msg`We couldn't send your message. Please try again.`;
+const CHAT_ACCOUNT_MISMATCH_MESSAGE = msg`That chat belongs to another email account, so we started a new one. Send your message again.`;
 
 export type Attachment = {
   id: string;
@@ -62,6 +64,16 @@ export type Chat = ReturnType<typeof useAiChat<ChatMessage>>;
 type ChatMessagePart =
   | { type: "file"; url: string; filename: string; mediaType: string }
   | { type: "text"; text: string };
+
+type QueuedMessage = {
+  attachments: Attachment[];
+  text: string;
+};
+
+type QueuedMessageWaiter = {
+  reject: (error: unknown) => void;
+  resolve: () => void;
+};
 
 type ChatSendError = {
   chatId: string;
@@ -91,6 +103,9 @@ type ChatContextType = {
   setNewChat: () => void;
   submitTextMessage: (text: string) => Promise<void>;
   handleSubmit: () => void;
+  queuedMessage: QueuedMessage | null;
+  sendQueuedMessageNow: () => Promise<void>;
+  unqueueMessage: () => void;
   stop: () => Promise<void>;
   context: MessageContext | null;
   setContext: (context: MessageContext | null) => void;
@@ -106,6 +121,7 @@ type ChatContextType = {
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
+  const { i18n } = useLingui();
   const { emailAccountId } = useAccount();
   const { mutate } = useSWRConfig();
 
@@ -117,6 +133,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sendError, setSendError] = useState<ChatSendError | null>(null);
+  // Sent while a reply runs; goes out as soon as the chat is free again.
+  const [queuedMessage, setQueuedMessage] = useState<QueuedMessage | null>(
+    null,
+  );
+  const [isStopping, setIsStopping] = useState(false);
+  const queuedWaitersRef = useRef<QueuedMessageWaiter[]>([]);
+  const queuedAccountIdRef = useRef<string | null>(null);
+  // Read when a send fails, after the render that started it.
+  const queuedMessageRef = useRef(queuedMessage);
+  useEffect(() => {
+    queuedMessageRef.current = queuedMessage;
+  }, [queuedMessage]);
+  const previousQueueChatIdRef = useRef(chatId);
   const [inlineActions, setInlineActions] = useState<InlineEmailAction[]>([]);
   const inlineActionsRef = useRef(inlineActions);
   const pendingInlineActionsRef = useRef<InlineEmailAction[] | null>(null);
@@ -125,6 +154,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const mailScreenActionHandlerRef = useRef<
     ((action: MailScreenAction) => void) | null
   >(null);
+  // A resumed run replays its tool results; each split is shown only once.
+  const shownSplitCallIdsRef = useRef(new Set<string>());
   const pendingRequestRef = useRef<PendingChatRequest | null>(null);
   const pendingRequestContextRef = useRef<MessageContext | null>(null);
   const previousChatIdRef = useRef(chatId);
@@ -143,7 +174,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [draftChatId, setDraftChatId] = useState(generateUUID);
   if (chatId === draftChatId) setDraftChatId(generateUUID());
 
-  const { data, error: chatLoadError } = useChatMessages(chatId);
+  const {
+    data,
+    error: chatLoadError,
+    mutate: mutateChatMessages,
+  } = useChatMessages(chatId);
   const persistedMessageIds = useMemo(
     () => new Set(data?.messages.map((message) => message.id) ?? []),
     [data?.messages],
@@ -208,16 +243,29 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       if ("error" in action) return;
       mailScreenActionHandlerRef.current?.(action);
     },
-    onFinish: async ({ isAbort }) => {
+    onFinish: async ({ message, isAbort }) => {
       pendingInlineActionsRef.current = null;
       pendingRequestRef.current = null;
       pendingRequestContextRef.current = null;
+      const splitChange = getSplitInboxChange(message);
       // An abort is a stop or a reattach, which refetch once the server has
       // saved the reply; refetching now would drop the partial one shown.
       await Promise.all([
         mutate("/api/user/rules"),
+        splitChange ? mutate("/api/mail/settings") : Promise.resolve(),
         chatId && !isAbort ? mutate(`/api/chats/${chatId}`) : Promise.resolve(),
       ]);
+      // Showing the split is the preview: the user sees what it catches and
+      // can ask for a change or a delete.
+      const shown = splitChange?.shown;
+      if (shown && !shownSplitCallIdsRef.current.has(shown.toolCallId)) {
+        shownSplitCallIdsRef.current.add(shown.toolCallId);
+        mailScreenActionHandlerRef.current?.({
+          action: "show_split",
+          splitId: shown.splitId,
+          emailAccountId,
+        });
+      }
     },
     onError: (error) => {
       if (resumingRef.current) {
@@ -278,7 +326,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setChatId(newChatId);
         showSendError({
           chatId: newChatId,
-          message: CHAT_ACCOUNT_MISMATCH_MESSAGE,
+          message: i18n._(CHAT_ACCOUNT_MISMATCH_MESSAGE),
           offerNewChat: false,
         });
         return;
@@ -292,7 +340,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       });
       showSendError({
         chatId: pendingRequest?.chatId ?? chatId ?? chat.id,
-        message: getChatSendErrorMessage(error),
+        message: getChatSendErrorMessage(error, i18n),
         offerNewChat: true,
       });
     },
@@ -429,6 +477,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setAmbientContext(null);
     setAttachments([]);
     setInlineActions([]);
+    rejectQueuedWaiters(takeQueuedWaiters(queuedWaitersRef));
+    setQueuedMessage(null);
   }, [chat.setMessages, emailAccountId, setChatId]);
 
   const setMailView = useCallback((mailView: MailViewContext | null) => {
@@ -465,7 +515,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           textLength,
         });
         logger.flush().catch(() => undefined);
-        toastError({ description: ASSISTANT_CHAT_MAX_TEXT_LENGTH_MESSAGE });
+        toastError({ description: getMaxTextLengthMessage(i18n) });
         throw new ChatInputValidationError();
       }
 
@@ -515,22 +565,25 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       context,
       ambientContext,
       emailAccountId,
+      i18n,
       setChatId,
     ],
   );
 
-  const submitTextMessage = useCallback(
-    async (text: string) => {
-      const trimmedText = text.trim();
-      if (!trimmedText) return;
+  // A queued message goes first, so a new one joins it until the chat is free.
+  // After an error the queue waits for the user, and sending is that signal.
+  const shouldQueue =
+    isRunActive || isStopping || (!!queuedMessage && chat.status !== "error");
 
-      await sendMessageParts([{ type: "text", text: trimmedText }]);
-      setInput("");
+  const queueDraft = useCallback(
+    (draft: QueuedMessage) => {
+      queuedAccountIdRef.current = emailAccountId;
+      setQueuedMessage((current) => mergeQueuedMessages(current, draft));
     },
-    [sendMessageParts],
+    [emailAccountId],
   );
 
-  const stop = useCallback(async () => {
+  const stopRun = useCallback(async () => {
     stoppedRef.current = true;
     interruptedRef.current = false;
     if (!chatId) {
@@ -576,63 +629,234 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     persistedMessageIds,
   ]);
 
-  const handleSubmit = useCallback(() => {
-    const text = input.trim();
-    if (!text && attachments.length === 0) return;
-    const submittedInput = input;
-    const submittedAttachments = attachments;
-
-    const fileParts = attachments.map((attachment) => ({
-      type: "file" as const,
-      url: attachment.url,
-      filename: attachment.name,
-      mediaType: attachment.contentType,
-    }));
-
-    const parts: ChatMessagePart[] = [...fileParts];
-
-    if (text) {
-      parts.push({ type: "text", text });
-    }
-
-    let sendPromise: Promise<void>;
+  const stop = useCallback(async () => {
+    setIsStopping(true);
     try {
-      sendPromise = sendMessageParts(parts);
-    } catch (error) {
-      if (!(error instanceof ChatInputValidationError)) {
-        reportChatRequestError({
-          emailAccountId,
-          error,
-          fallbackChatId: chatId ?? chat.id,
-          request: pendingRequestRef.current,
-        });
-        showSendError({
-          chatId: chatId ?? chat.id,
-          message: CHAT_SEND_FAILED_MESSAGE,
-          offerNewChat: true,
-        });
+      await stopRun();
+    } finally {
+      setIsStopping(false);
+    }
+  }, [stopRun]);
+
+  const restoreDraft = useCallback((draft: QueuedMessage) => {
+    setInput((current) =>
+      current ? `${draft.text}\n\n${current}` : draft.text,
+    );
+    setAttachments((current) => mergeAttachments(draft.attachments, current));
+  }, []);
+
+  // Returns null when the message could not be sent at all.
+  const sendDraft = useCallback(
+    (draft: QueuedMessage) => {
+      const text = draft.text.trim();
+      const parts: ChatMessagePart[] = draft.attachments.map((attachment) => ({
+        type: "file" as const,
+        url: attachment.url,
+        filename: attachment.name,
+        mediaType: attachment.contentType,
+      }));
+      if (text) parts.push({ type: "text", text });
+
+      let sendPromise: Promise<void>;
+      try {
+        sendPromise = sendMessageParts(parts);
+      } catch (error) {
+        if (!(error instanceof ChatInputValidationError)) {
+          reportChatRequestError({
+            emailAccountId,
+            error,
+            fallbackChatId: chatId ?? chat.id,
+            request: pendingRequestRef.current,
+          });
+          showSendError({
+            chatId: chatId ?? chat.id,
+            message: i18n._(CHAT_SEND_FAILED_MESSAGE),
+            offerNewChat: true,
+          });
+        }
+        return null;
       }
+
+      sendPromise.catch(() => {
+        // A message queued behind this one was meant to follow it, so both
+        // go back in the input in that order rather than the queue sending
+        // ahead of the retry.
+        const queued = queuedMessageRef.current;
+        if (!queued) {
+          restoreDraft(draft);
+          return;
+        }
+        rejectQueuedWaiters(takeQueuedWaiters(queuedWaitersRef));
+        setQueuedMessage(null);
+        restoreDraft(mergeQueuedMessages(draft, queued));
+      });
+      return sendPromise;
+    },
+    [
+      chat.id,
+      chatId,
+      emailAccountId,
+      i18n,
+      restoreDraft,
+      sendMessageParts,
+      showSendError,
+    ],
+  );
+
+  const sendQueuedMessage = useCallback(
+    (draft: QueuedMessage) => {
+      const waiters = takeQueuedWaiters(queuedWaitersRef);
+      setQueuedMessage(null);
+      const sendPromise = sendDraft(draft);
+      if (!sendPromise) {
+        restoreDraft(draft);
+        rejectQueuedWaiters(waiters);
+        return;
+      }
+      sendPromise.then(
+        () => {
+          for (const waiter of waiters) waiter.resolve();
+        },
+        () => rejectQueuedWaiters(waiters),
+      );
+    },
+    [restoreDraft, sendDraft],
+  );
+
+  const handleSubmit = useCallback(() => {
+    if (!input.trim() && attachments.length === 0) return;
+    const draft = { text: input, attachments };
+
+    if (queuedMessage && !shouldQueue) {
+      // Cleared first: if the merged message can't be sent, the queue puts
+      // all of it back in the input.
+      setAttachments([]);
+      setInput("");
+      sendQueuedMessage(mergeQueuedMessages(queuedMessage, draft));
       return;
     }
+    if (shouldQueue) queueDraft(draft);
+    else if (!sendDraft(draft)) return;
 
     setAttachments([]);
     setInput("");
-    sendPromise.catch(() => {
-      setInput((current) =>
-        current ? `${submittedInput}\n\n${current}` : submittedInput,
-      );
-      setAttachments((current) =>
-        mergeAttachments(submittedAttachments, current),
-      );
-    });
   }, [
     attachments,
-    chat.id,
-    chatId,
-    emailAccountId,
     input,
-    sendMessageParts,
-    showSendError,
+    queueDraft,
+    queuedMessage,
+    sendDraft,
+    sendQueuedMessage,
+    shouldQueue,
+  ]);
+
+  const submitTextMessage = useCallback(
+    async (text: string) => {
+      const trimmedText = text.trim();
+      if (!trimmedText) return;
+
+      // Callers such as the rule card treat a resolved call as sent, so a
+      // queued message settles only once it actually goes out.
+      if (shouldQueue || queuedMessage) {
+        const draft = { text: trimmedText, attachments: [] };
+        await new Promise<void>((resolve, reject) => {
+          queuedWaitersRef.current.push({ resolve, reject });
+          // After an error the queue waits for the user, and this is them.
+          if (shouldQueue || !queuedMessage) queueDraft(draft);
+          else sendQueuedMessage(mergeQueuedMessages(queuedMessage, draft));
+        });
+        return;
+      }
+
+      await sendMessageParts([{ type: "text", text: trimmedText }]);
+      setInput("");
+    },
+    [
+      queueDraft,
+      queuedMessage,
+      sendMessageParts,
+      sendQueuedMessage,
+      shouldQueue,
+    ],
+  );
+
+  // Takes the queued message back into the input, unsent.
+  const unqueueMessage = useCallback(() => {
+    if (!queuedMessage) return;
+    rejectQueuedWaiters(takeQueuedWaiters(queuedWaitersRef));
+    setQueuedMessage(null);
+    restoreDraft(queuedMessage);
+  }, [queuedMessage, restoreDraft]);
+
+  // The draft input survives a chat switch, so a queued message rejoins it
+  // rather than being dropped.
+  const unqueueMessageRef = useRef(unqueueMessage);
+  useEffect(() => {
+    unqueueMessageRef.current = unqueueMessage;
+  }, [unqueueMessage]);
+  useEffect(() => {
+    if (previousQueueChatIdRef.current === chatId) return;
+    previousQueueChatIdRef.current = chatId;
+    unqueueMessageRef.current();
+  }, [chatId]);
+
+  // The server frees the chat only after saving the reply, so a queued message
+  // waits until the refetched chat has the reply and no run. After an error it
+  // waits for the user, since the failed message may need to go first.
+  const lastMessageId = chat.messages.at(-1)?.id;
+  const isChatSettled = !isRunActive && !isStopping && chat.status !== "error";
+  const isChatFree =
+    isChatSettled &&
+    !!lastMessageId &&
+    persistedMessageIds.has(lastMessageId) &&
+    !data?.activeStreamId;
+
+  useEffect(() => {
+    if (!queuedMessage || !isChatFree) return;
+    // An account switch clears the queue in this same commit; the chat shown
+    // as free may still be the previous account's.
+    if (queuedAccountIdRef.current !== emailAccountId) return;
+    sendQueuedMessage(queuedMessage);
+  }, [emailAccountId, isChatFree, queuedMessage, sendQueuedMessage]);
+
+  // A reply that just ended can still be saving; check again until it's done.
+  const isWaitingForSave = !!queuedMessage && isChatSettled && !isChatFree;
+  useEffect(() => {
+    if (!isWaitingForSave) return;
+    // Each check waits for the last: SWR drops a response once a newer request
+    // starts, so overlapping checks on a slow server would never land.
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const check = async () => {
+      await mutateChatMessages().catch(() => undefined);
+      if (!cancelled) timer = setTimeout(check, SAVE_POLL_MS);
+    };
+    timer = setTimeout(check, SAVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isWaitingForSave, mutateChatMessages]);
+
+  const sendQueuedMessageNow = useCallback(async () => {
+    // Stopping keeps the partial reply, so the queued message steers from
+    // where the run left off; the effect above sends it once the run ends.
+    if (isRunActive) {
+      await stop();
+      return;
+    }
+    // A finished reply still being saved is sent by the effect above. After an
+    // error nothing else will send it, so the user's click does.
+    if (queuedMessage && chat.status === "error" && !isStopping) {
+      sendQueuedMessage(queuedMessage);
+    }
+  }, [
+    chat.status,
+    isRunActive,
+    isStopping,
+    queuedMessage,
+    sendQueuedMessage,
+    stop,
   ]);
 
   return (
@@ -654,6 +878,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setNewChat,
         submitTextMessage,
         handleSubmit,
+        queuedMessage,
+        sendQueuedMessageNow,
+        unqueueMessage,
         stop,
         context: context ?? ambientContext,
         setContext: setDisplayedContext,
@@ -693,6 +920,36 @@ function getChatTextLength(parts: ChatMessagePart[]) {
     (length, part) => length + (part.type === "text" ? part.text.length : 0),
     0,
   );
+}
+
+function takeQueuedWaiters(ref: { current: QueuedMessageWaiter[] }) {
+  const waiters = ref.current;
+  ref.current = [];
+  return waiters;
+}
+
+// The queue puts an unsent message back in the input itself.
+function rejectQueuedWaiters(waiters: QueuedMessageWaiter[]) {
+  for (const waiter of waiters) waiter.reject(new QueuedMessageNotSentError());
+}
+
+/** A queued message didn't go out; its text is already back in the input. */
+export class QueuedMessageNotSentError extends Error {
+  constructor() {
+    super("The queued message was not sent");
+    this.name = "QueuedMessageNotSentError";
+  }
+}
+
+function mergeQueuedMessages(
+  current: QueuedMessage | null,
+  next: QueuedMessage,
+): QueuedMessage {
+  if (!current) return next;
+  return {
+    text: [current.text.trim(), next.text.trim()].filter(Boolean).join("\n\n"),
+    attachments: [...current.attachments, ...next.attachments],
+  };
 }
 
 function mergeAttachments(
@@ -752,7 +1009,7 @@ function isChatAccountMismatchError(error: unknown) {
   );
 }
 
-function getChatSendErrorMessage(error: unknown) {
+function getChatSendErrorMessage(error: unknown, i18n: I18n) {
   const statusCode = getErrorStatusCode(error);
   const serverMessage = getChatRequestErrorBody(error)?.error;
   // 4xx responses explain what the user can do; 5xx bodies are not for users.
@@ -762,9 +1019,11 @@ function getChatSendErrorMessage(error: unknown) {
     typeof serverMessage === "string" &&
     serverMessage.trim()
   ) {
+    if (serverMessage === ASSISTANT_CHAT_MAX_TEXT_LENGTH_MESSAGE)
+      return getMaxTextLengthMessage(i18n);
     return serverMessage;
   }
-  return CHAT_SEND_FAILED_MESSAGE;
+  return i18n._(CHAT_SEND_FAILED_MESSAGE);
 }
 
 function getChatRequestErrorBody(
@@ -782,4 +1041,31 @@ function getChatRequestErrorBody(
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether the assistant changed splits in this reply, and the last split it
+ * created or edited, which a later delete of another split doesn't hide.
+ */
+function getSplitInboxChange(
+  message: ChatMessage,
+): { shown?: { toolCallId: string; splitId: string } } | null {
+  let changed = false;
+  let shown: { toolCallId: string; splitId: string } | undefined;
+  for (const part of message.parts) {
+    if (part.type !== "tool-manageSplitInbox") continue;
+    if (part.state !== "output-available" || !part.output.success) continue;
+    if (!("action" in part.output)) continue;
+    changed = true;
+    if (part.output.action !== "create" && part.output.action !== "update")
+      continue;
+    const splitId = part.output.split?.id;
+    if (splitId) shown = { toolCallId: part.toolCallId, splitId };
+  }
+  return changed ? { shown } : null;
+}
+
+function getMaxTextLengthMessage(i18n: I18n) {
+  const maxLength = i18n.number(ASSISTANT_CHAT_MAX_TEXT_LENGTH);
+  return i18n._(msg`Messages can be up to ${maxLength} characters.`);
 }
