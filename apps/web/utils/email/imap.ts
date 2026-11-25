@@ -1517,7 +1517,7 @@ export class ImapProvider implements EmailProvider {
         const lock = await lockIndexedMailbox(client, group, {
           readOnly: true,
         }).catch((error) => {
-          if (!(error instanceof StaleImapIndexError)) throw error;
+          if (!isStaleIndexError(error)) throw error;
           this.logger.warn("Skipping an IMAP folder with reassigned UIDs", {
             path: group.path,
           });
@@ -2340,11 +2340,21 @@ function assertLabelFolder(path: string) {
   if (!isLabelFolder(path)) throw new SafeError("This is not a label.");
 }
 
-class StaleImapIndexError extends SafeError {}
-
+// A marked SafeError rather than a subclass, so importing this module does not
+// need SafeError, which some tests mock away.
 function staleIndexError() {
-  return new StaleImapIndexError(
-    "This folder changed on the mail server. Try again in a minute.",
+  return Object.assign(
+    new SafeError(
+      "This folder changed on the mail server. Try again in a minute.",
+    ),
+    { staleImapIndex: true },
+  );
+}
+
+function isStaleIndexError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error as { staleImapIndex?: boolean }).staleImapIndex === true
   );
 }
 

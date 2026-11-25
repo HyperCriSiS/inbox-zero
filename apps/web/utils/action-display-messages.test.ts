@@ -17,6 +17,11 @@ const actionCases: Record<ActionType, Omit<DisplayAction, "type">[]> = {
     { label: "Receipts from vendors" },
     { labelId: "label-1", label: "Old name" },
   ],
+  [ActionType.REMOVE_LABEL]: [
+    {},
+    { label: "Receipts from vendors" },
+    { labelId: "label-1", label: "Old name" },
+  ],
   [ActionType.ARCHIVE]: [{}],
   [ActionType.DELETE]: [{}],
   [ActionType.MARK_READ]: [{}],
