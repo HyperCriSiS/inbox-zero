@@ -1,5 +1,6 @@
 "use client";
 
+import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { redirectToSafeUrl } from "@/utils/redirect";
 export function AddAccount({ helperText }: { helperText: ReactNode }) {
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const [isLoadingMicrosoft, setIsLoadingMicrosoft] = useState(false);
+  const { t } = useLingui();
 
   const handleAddAccount = async (provider: "google" | "microsoft") => {
     const setLoading = isGoogleProvider(provider)
@@ -28,11 +30,13 @@ export function AddAccount({ helperText }: { helperText: ReactNode }) {
     } catch (error) {
       console.error(`Error initiating ${provider} link:`, error);
       toastError({
-        title: `Error initiating ${isGoogleProvider(provider) ? "Google" : "Microsoft"} link`,
+        title: isGoogleProvider(provider)
+          ? t`Error initiating Google link`
+          : t`Error initiating Microsoft link`,
         description:
           error instanceof Error
             ? error.message
-            : "Please try again or contact support",
+            : t`Please try again or contact support`,
       });
       setLoading(false);
     }
@@ -59,7 +63,9 @@ export function AddAccount({ helperText }: { helperText: ReactNode }) {
             height={24}
             unoptimized
           />
-          <span className="ml-2">Add Google</span>
+          <span className="ml-2">
+            <Trans>Add Google</Trans>
+          </span>
         </Button>
         <Button
           variant="outline"
@@ -75,7 +81,9 @@ export function AddAccount({ helperText }: { helperText: ReactNode }) {
             height={24}
             unoptimized
           />
-          <span className="ml-2">Add Microsoft</span>
+          <span className="ml-2">
+            <Trans>Add Microsoft</Trans>
+          </span>
         </Button>
       </div>
 

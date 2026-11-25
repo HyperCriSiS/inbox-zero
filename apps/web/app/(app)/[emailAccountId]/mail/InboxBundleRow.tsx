@@ -2,6 +2,7 @@
 
 import { memo, useMemo, type Ref } from "react";
 import { ChevronDownIcon, LayersIcon } from "lucide-react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { MailThreadRow } from "@inboxzero/mail-ui/MailThreadRow";
 import type { InboxBundle } from "@/app/(app)/[emailAccountId]/mail/inbox-bundles";
 import { isThreadUnread } from "@/app/(app)/[emailAccountId]/mail/read-state";
@@ -13,7 +14,7 @@ import { formatShortDate } from "@/utils/date";
 import { getConversationSubject } from "@/utils/email/subject";
 import { getThreadTimestamp } from "@/utils/threads/sort";
 
-/** One collapsed row standing in for every inbox thread in a bundled split. */
+/** One collapsed row standing in for every inbox thread in a bundle. */
 export const InboxBundleRow = memo(function InboxBundleRow({
   bundle,
   index,
@@ -45,18 +46,33 @@ export const InboxBundleRow = memo(function InboxBundleRow({
   onSelectRangeTo: (index: number) => void;
   rowRef?: Ref<HTMLDivElement>;
 }) {
-  const senders = useMemo(
-    () =>
-      // Deduplicated in recency order, so the newest senders are named first.
-      [
-        ...new Set(
-          bundle.threads.flatMap((thread) =>
-            getThreadParticipantNames(thread.messages, userEmail),
-          ),
+  const { t, i18n } = useLingui();
+  // A split bundle names who it holds and previews its newest subject. A
+  // sender bundle already names its sender, so it lists subjects instead.
+  const summary = useMemo(() => {
+    if (bundle.kind === "sender") {
+      const [newestSubject = "", ...olderSubjects] = new Set(
+        bundle.threads.flatMap(
+          (thread) => getConversationSubject(thread.messages) || [],
         ),
-      ],
-    [bundle.threads, userEmail],
-  );
+      );
+      return { headline: newestSubject, preview: olderSubjects.join(", ") };
+    }
+    // Deduplicated in recency order, so the newest senders are named first.
+    const senders = new Set(
+      bundle.threads.flatMap((thread) =>
+        getThreadParticipantNames(
+          [...(thread.participantMessages ?? []), ...thread.messages],
+          ("account" in thread ? thread.account?.email : null) ?? userEmail,
+          t`me`,
+        ),
+      ),
+    );
+    return {
+      headline: [...senders].join(", "),
+      preview: getConversationSubject(bundle.threads[0]?.messages ?? []),
+    };
+  }, [bundle.kind, bundle.threads, userEmail, t]);
   const newest = bundle.threads[0];
   if (!newest) return null;
   // Zero means no message had a readable date.
@@ -64,15 +80,21 @@ export const InboxBundleRow = memo(function InboxBundleRow({
 
   return (
     <MailThreadRow
-      accountAvatar={
-        <LayersIcon aria-hidden className="size-3.5 shrink-0 text-primary" />
+      countBadge={
+        <span className="inline-flex shrink-0 items-center gap-1 self-center rounded-md bg-primary/10 px-1.5 py-px font-medium text-primary text-xs leading-4">
+          <LayersIcon aria-hidden className="size-3" />
+          {bundle.threads.length}
+        </span>
       }
       compact={compact}
       expandedPreview={expandedPreview}
       date={
         <span className="text-muted-foreground text-xs">
           {timestamp
-            ? formatShortDate(new Date(timestamp), { lowercase: true })
+            ? formatShortDate(new Date(timestamp), {
+                lowercase: true,
+                locale: i18n.locale,
+              })
             : null}
         </span>
       }
@@ -93,7 +115,7 @@ export const InboxBundleRow = memo(function InboxBundleRow({
       participantSummary={bundle.name}
       renderSelectionControl={({ ariaLabel, checked, onClick, visible }) => (
         <Checkbox
-          aria-label={ariaLabel.replace("conversation", "bundle")}
+          aria-label={ariaLabel}
           checked={checked}
           className={getMailRowCheckboxClassName(visible)}
           onClick={onClick}
@@ -101,8 +123,11 @@ export const InboxBundleRow = memo(function InboxBundleRow({
       )}
       rowRef={rowRef}
       selectionEnabled={selectionEnabled}
-      snippet={getConversationSubject(newest.messages)}
-      subject={senders.join(", ")}
+      snippet={summary.preview}
+      strings={{
+        selectConversation: (bundleName) => t`Select bundle with ${bundleName}`,
+      }}
+      subject={summary.headline}
     />
   );
 });
@@ -127,7 +152,9 @@ export function InboxBundleHeader({
       <LayersIcon aria-hidden className="size-3.5 text-primary" />
       <span className="font-medium text-foreground">{bundle.name}</span>
       <span>{bundle.threads.length}</span>
-      <span className="ml-auto">Collapse</span>
+      <span className="ml-auto">
+        <Trans>Collapse</Trans>
+      </span>
     </button>
   );
 }

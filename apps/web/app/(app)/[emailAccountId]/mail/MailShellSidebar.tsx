@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { toast } from "sonner";
 import type { KeyedMutator } from "swr";
 import { MailAccountSwitcher } from "@/app/(app)/[emailAccountId]/mail/MailAccountSwitcher";
@@ -57,7 +58,6 @@ import { GMAIL_LABEL_COLORS } from "@/utils/gmail/label-colors";
 import type { MailboxLabelCount } from "@/utils/mail-engine/label-count-targets";
 import { OUTLOOK_CATEGORY_COLORS } from "@/utils/outlook/category-colors";
 import { prefixPath } from "@/utils/path";
-import { getEmailTerminology } from "@/utils/terminology";
 import { randomUuid } from "@/utils/uuid";
 
 const OUTLOOK_LABEL_COLOR_OPTIONS = OUTLOOK_CATEGORY_COLORS.map((option) => ({
@@ -110,7 +110,8 @@ export const MailShellSidebar = memo(function MailShellSidebar({
   const { emailAccountId, provider } = useAccount();
   const isGoogle = isGoogleProvider(provider);
   const isOutlook = isMicrosoftProvider(provider);
-  const terminology = getEmailTerminology(provider);
+  const { t } = useLingui();
+  const failureMessage = t`Something went wrong. Try again.`;
   const { userLabels: allLabels, mutate: mutateLabels } = useLabels();
   const { folders, mutate: mutateFolders } = useFolders(provider);
   const { countsById, mutate: mutateCounts } = useLabelCounts({
@@ -190,7 +191,9 @@ export const MailShellSidebar = memo(function MailShellSidebar({
           rollbackOnError: true,
         },
       )
-        .catch(toastMailboxItemFailure)
+        .catch((error: unknown) =>
+          toastMailboxItemFailure(error, failureMessage),
+        )
         .finally(() => {
           creatingLabels.current.delete(placeholderId);
           // A sidebar change made meanwhile supersedes this result in SWR, so
@@ -198,7 +201,7 @@ export const MailShellSidebar = memo(function MailShellSidebar({
           mutateLabels().catch(() => {});
         });
     },
-    [emailAccountId, mutateLabels],
+    [emailAccountId, failureMessage, mutateLabels],
   );
 
   const onEditMailboxItem = useCallback(
@@ -211,23 +214,38 @@ export const MailShellSidebar = memo(function MailShellSidebar({
           }),
         );
       if (edit.kind === "folder") {
-        updateOptimistically(mutateFolders, request, (folders) =>
-          mapFolders(folders ?? [], (folder) =>
-            folder.id === edit.id
-              ? { ...folder, displayName: edit.name }
-              : folder,
-          ),
+        updateOptimistically(
+          mutateFolders,
+          request,
+          (folders) =>
+            mapFolders(folders ?? [], (folder) =>
+              folder.id === edit.id
+                ? { ...folder, displayName: edit.name }
+                : folder,
+            ),
+          failureMessage,
         );
       } else {
-        updateOptimistically(mutateLabels, request, (current) => ({
-          labels: (current?.labels ?? []).map((label) =>
-            label.id === edit.id ? { ...label, ...edit } : label,
-          ),
-        }));
+        updateOptimistically(
+          mutateLabels,
+          request,
+          (current) => ({
+            labels: (current?.labels ?? []).map((label) =>
+              label.id === edit.id ? { ...label, ...edit } : label,
+            ),
+          }),
+          failureMessage,
+        );
       }
       return true;
     },
-    [emailAccountId, mutateFolders, mutateLabels, resolveLabelId],
+    [
+      emailAccountId,
+      failureMessage,
+      mutateFolders,
+      mutateLabels,
+      resolveLabelId,
+    ],
   );
 
   const onDeleteMailboxItem = useCallback(
@@ -244,19 +262,28 @@ export const MailShellSidebar = memo(function MailShellSidebar({
       };
       const deleted =
         item.kind === "folder"
-          ? updateOptimistically(mutateFolders, request, (folders) =>
-              withoutFolder(folders ?? [], item.id),
+          ? updateOptimistically(
+              mutateFolders,
+              request,
+              (folders) => withoutFolder(folders ?? [], item.id),
+              failureMessage,
             )
-          : updateOptimistically(mutateLabels, request, (current) => ({
-              labels: (current?.labels ?? []).filter(
-                (label) => label.id !== item.id,
-              ),
-            }));
+          : updateOptimistically(
+              mutateLabels,
+              request,
+              (current) => ({
+                labels: (current?.labels ?? []).filter(
+                  (label) => label.id !== item.id,
+                ),
+              }),
+              failureMessage,
+            );
       await onMailboxItemDeleted(item, deleted);
       return true;
     },
     [
       emailAccountId,
+      failureMessage,
       mutateCounts,
       mutateFolders,
       mutateLabels,
@@ -315,17 +342,19 @@ export const MailShellSidebar = memo(function MailShellSidebar({
       hrefFor={hrefFor}
       onNavigate={inSheet ? navigateFromSheet : onNavigate}
       labels={isAllAccounts ? NO_LABELS : allLabels}
-      folders={isAllAccounts || !supportsFolders(provider) ? NO_FOLDERS : folders}
+      folders={
+        isAllAccounts || !supportsFolders(provider) ? NO_FOLDERS : folders
+      }
       countsById={isAllAccounts ? NO_COUNTS : countsById}
       categories={
         isAllAccounts
           ? NO_CATEGORIES
           : getMailCategories({ isGoogle, isOutlook })
       }
-      categoryHeading={isOutlook ? "Inbox" : "Categories"}
+      categoryHeading={isOutlook ? t`Inbox` : t`Categories`}
       collapsibleCategories={!isOutlook}
-      labelsHeading={terminology.label.pluralCapitalized}
-      labelSingular={terminology.label.singular}
+      labelsHeading={isOutlook ? t`Categories` : t`Labels`}
+      labelSingular={isOutlook ? t`category` : t`label`}
       emailAccountId={emailAccountId}
       onCompose={inSheet ? composeFromSheet : openCompose}
       onOpenSettings={inSheet ? openSettingsFromSheet : openSettings}
@@ -381,7 +410,7 @@ export const MailShellSidebar = memo(function MailShellSidebar({
           {renderMailSidebar({ collapsed: !isMailSidebarOpen, inSheet: false })}
           {isMailSidebarOpen ? (
             <PanelResizeHandle
-              label="Resize sidebar"
+              label={t`Resize sidebar`}
               edge="right"
               bounds={MAIL_SIDEBAR_WIDTH_BOUNDS}
               onResize={setSidebarWidth}
@@ -409,7 +438,9 @@ export const MailShellSidebar = memo(function MailShellSidebar({
             } as CSSProperties
           }
         >
-          <SheetTitle className="sr-only">Mail navigation</SheetTitle>
+          <SheetTitle className="sr-only">
+            <Trans>Mail navigation</Trans>
+          </SheetTitle>
           {renderMailSidebar({ collapsed: false, inSheet: true })}
         </SheetContent>
       </Sheet>
@@ -439,6 +470,7 @@ function updateOptimistically<T>(
   mutate: KeyedMutator<T>,
   request: () => Promise<void>,
   apply: (current: T | undefined) => T,
+  failureMessage: string,
 ) {
   return mutate(
     async (current) => {
@@ -455,16 +487,14 @@ function updateOptimistically<T>(
   ).then(
     () => true,
     (error: unknown) => {
-      toastMailboxItemFailure(error);
+      toastMailboxItemFailure(error, failureMessage);
       return false;
     },
   );
 }
 
-function toastMailboxItemFailure(error: unknown) {
-  toast.error(
-    error instanceof Error ? error.message : "Something went wrong. Try again.",
-  );
+function toastMailboxItemFailure(error: unknown, failureMessage: string) {
+  toast.error(error instanceof Error ? error.message : failureMessage);
 }
 
 function mapFolders(

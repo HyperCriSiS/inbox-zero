@@ -3,6 +3,7 @@
 import { ServerBulkRun } from "@/app/(app)/[emailAccountId]/assistant/ServerBulkRun";
 import { useReducer, useRef, useState } from "react";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@/components/ui/button";
 import { SectionDescription } from "@/components/Typography";
 import { LoadingContent } from "@/components/LoadingContent";
@@ -48,6 +49,7 @@ import { useAiAutomationStatus } from "@/hooks/useAiAutomationStatus";
 const TRIAL_BULK_PROCESS_EMAIL_LIMIT = 2000;
 
 export function BulkRunRules() {
+  const { t, i18n } = useLingui();
   const { emailAccountId } = useAccount();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -87,6 +89,7 @@ export function BulkRunRules() {
   const [runOnServer, setRunOnServer] = useState(false);
 
   const abortRef = useRef<() => void>(undefined);
+  const runIdRef = useRef(0);
 
   // Derived state
   const remaining = new Set(
@@ -109,16 +112,17 @@ export function BulkRunRules() {
   useBeforeUnload(isBusy);
 
   const handleStart = async () => {
+    const runId = ++runIdRef.current;
     dispatch({ type: "START" });
 
     if (!startDate) {
-      toastError({ description: "Please select a start date" });
+      toastError({ description: t`Please select a start date` });
       dispatch({ type: "RESET" });
       return;
     }
     if (!emailAccountId) {
       toastError({
-        description: "Email account ID is missing. Please refresh the page.",
+        description: t`Email account ID is missing. Please refresh the page.`,
       });
       dispatch({ type: "RESET" });
       return;
@@ -137,11 +141,15 @@ export function BulkRunRules() {
           generateDraftReplies,
           rerun: isRerunEnabled,
           maxEmails: isTrial ? TRIAL_BULK_PROCESS_EMAIL_LIMIT : undefined,
+          i18n,
         },
+        // A stopped run's queue can still report after a new run starts.
         (threads) => {
+          if (runIdRef.current !== runId) return;
           dispatch({ type: "THREADS_QUEUED", threads });
         },
         (completionStatus, count) => {
+          if (runIdRef.current !== runId) return;
           if (completionStatus !== "success") {
             dispatch({ type: "STOP", completedCount: count });
             return;
@@ -150,14 +158,15 @@ export function BulkRunRules() {
           dispatch({ type: "COMPLETE", count });
         },
         (resumeAt) => {
+          if (runIdRef.current !== runId) return;
           dispatch({ type: "RATE_LIMIT_WAIT", resumeAt });
         },
       );
     } catch (error) {
       console.error("Failed to start bulk processing:", error);
       toastError({
-        title: "Failed to start",
-        description: "An error occurred. Please try again.",
+        title: t`Failed to start`,
+        description: t`An error occurred. Please try again.`,
       });
       dispatch({ type: "RESET" });
     }
@@ -178,21 +187,23 @@ export function BulkRunRules() {
     abortRef.current?.();
   };
 
-  const progressMessage = getProgressMessage(state, remaining);
+  const progressMessage = getProgressMessage(state, remaining, i18n);
 
   return (
     <div>
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogTrigger asChild>
           <Button type="button" variant="outline" size="sm">
-            Process Past Emails
+            <Trans>Process Past Emails</Trans>
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Bulk Process Emails</DialogTitle>
+            <DialogTitle>
+              <Trans>Bulk Process Emails</Trans>
+            </DialogTitle>
             <DialogDescription>
-              Run your rules on emails already in your inbox.
+              <Trans>Run your rules on emails already in your inbox.</Trans>
             </DialogDescription>
           </DialogHeader>
           {progressMessage && (
@@ -207,9 +218,11 @@ export function BulkRunRules() {
               role="status"
               className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
             >
-              Your email provider is limiting requests, so processing is paused.
-              It will continue automatically around{" "}
-              {state.rateLimitResumeAt.toLocaleTimeString()}.
+              <Trans>
+                Your email provider is limiting requests, so processing is
+                paused. It will continue automatically around{" "}
+                {state.rateLimitResumeAt.toLocaleTimeString(i18n.locale)}.
+              </Trans>
             </div>
           )}
           <LoadingContent loading={isLoadingPremium}>
@@ -223,7 +236,7 @@ export function BulkRunRules() {
                     dispatch({ type: "RESET" });
                   }}
                   value={startDate}
-                  placeholder="Set start date"
+                  placeholder={t`Set start date`}
                   disabled={isRunActive}
                 />
                 <SetDateDropdown
@@ -232,14 +245,15 @@ export function BulkRunRules() {
                     dispatch({ type: "RESET" });
                   }}
                   value={endDate}
-                  placeholder="Set end date (optional)"
+                  placeholder={t`Set end date (optional)`}
                   disabled={isRunActive}
                 />
               </div>
 
               <ItemCard>
                 <ToggleRow
-                  title="Include read emails"
+                  title={t`Include read emails`}
+                  upgradeLabel={t`Upgrade to use include read emails`}
                   checked={isIncludeReadEnabled}
                   onCheckedChange={setIncludeRead}
                   disabled={isRunActive}
@@ -247,7 +261,8 @@ export function BulkRunRules() {
                 />
                 <ItemSeparator />
                 <ToggleRow
-                  title="Rerun rules on already processed emails"
+                  title={t`Rerun rules on already processed emails`}
+                  upgradeLabel={t`Upgrade to use rerun rules on already processed emails`}
                   checked={isRerunEnabled}
                   onCheckedChange={setRerun}
                   disabled={isRunActive}
@@ -255,7 +270,7 @@ export function BulkRunRules() {
                 />
                 <ItemSeparator />
                 <ToggleRow
-                  title="Generate draft replies"
+                  title={t`Generate draft replies`}
                   checked={generateDraftReplies}
                   onCheckedChange={setGenerateDraftReplies}
                   disabled={isBusy}
@@ -289,7 +304,7 @@ export function BulkRunRules() {
                 <div className="flex flex-col gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200 sm:flex-row sm:items-center sm:justify-between">
                   <span>
                     {trialAiLimitMessage ??
-                      `Trials can process up to ${TRIAL_BULK_PROCESS_EMAIL_LIMIT.toLocaleString()} past emails at a time.`}
+                      t`Trials can process up to ${TRIAL_BULK_PROCESS_EMAIL_LIMIT.toLocaleString()} past emails at a time.`}
                   </span>
                   <EndTrialButton
                     size="sm"
@@ -326,7 +341,7 @@ export function BulkRunRules() {
                     }
                     onClick={handleStart}
                   >
-                    Process Emails
+                    <Trans>Process Emails</Trans>
                   </Button>
                 )}
               {isRunActive && (
@@ -335,30 +350,28 @@ export function BulkRunRules() {
                     {isPaused ? (
                       <>
                         <PlayIcon className="mr-1.5 h-3.5 w-3.5" />
-                        Resume
+                        <Trans>Resume</Trans>
                       </>
                     ) : (
                       <>
                         <PauseIcon className="mr-1.5 h-3.5 w-3.5" />
-                        Pause
+                        <Trans>Pause</Trans>
                       </>
                     )}
                   </Button>
                   <Button variant="outline" size="sm" onClick={handleStop}>
                     <SquareIcon className="mr-1.5 h-3.5 w-3.5" />
-                    Stop
+                    <Trans>Stop</Trans>
                   </Button>
                 </div>
               )}
 
               {state.runResult && state.runResult.count === 0 && (
                 <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">
-                  No{" "}
-                  {describeTargetedEmails({
-                    includeRead: isIncludeReadEnabled,
-                    rerun: isRerunEnabled,
-                  })}{" "}
-                  found in your inbox in the selected date range.
+                  <NoTargetedEmailsMessage
+                    includeRead={isIncludeReadEnabled}
+                    rerun={isRerunEnabled}
+                  />
                 </div>
               )}
             </div>
@@ -376,8 +389,10 @@ function ToggleRow({
   onCheckedChange,
   disabled,
   onUpgrade,
+  upgradeLabel,
 }: {
   title: string;
+  upgradeLabel?: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled: boolean;
@@ -388,7 +403,9 @@ function ToggleRow({
       <ItemContent>
         <ItemTitle>{title}</ItemTitle>
         {onUpgrade && (
-          <ItemDescription>Available on the Professional plan.</ItemDescription>
+          <ItemDescription>
+            <Trans>Available on the Professional plan.</Trans>
+          </ItemDescription>
         )}
       </ItemContent>
       <ItemActions>
@@ -397,10 +414,10 @@ function ToggleRow({
             type="button"
             size="sm"
             variant="outline"
-            aria-label={`Upgrade to use ${title.toLowerCase()}`}
+            aria-label={upgradeLabel}
             onClick={onUpgrade}
           >
-            Upgrade
+            <Trans>Upgrade</Trans>
           </Button>
         ) : (
           <Switch
@@ -415,17 +432,36 @@ function ToggleRow({
   );
 }
 
-function describeTargetedEmails({
+function NoTargetedEmailsMessage({
   includeRead,
   rerun,
 }: {
   includeRead: boolean;
   rerun: boolean;
 }) {
-  const qualifiers = [
-    includeRead ? null : "unread",
-    rerun ? null : "unprocessed",
-  ].filter(Boolean);
-
-  return qualifiers.length ? `${qualifiers.join(", ")} emails` : "emails";
+  if (includeRead && rerun) {
+    return (
+      <Trans>No emails found in your inbox in the selected date range.</Trans>
+    );
+  }
+  if (includeRead) {
+    return (
+      <Trans>
+        No unprocessed emails found in your inbox in the selected date range.
+      </Trans>
+    );
+  }
+  if (rerun) {
+    return (
+      <Trans>
+        No unread emails found in your inbox in the selected date range.
+      </Trans>
+    );
+  }
+  return (
+    <Trans>
+      No unread, unprocessed emails found in your inbox in the selected date
+      range.
+    </Trans>
+  );
 }

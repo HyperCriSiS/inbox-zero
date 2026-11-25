@@ -180,6 +180,7 @@ describe("chat route rule freshness persistence", () => {
       emailAccountId: "email-account-id",
       lastSeenRulesRevision: 2,
       messages: [],
+      actionTotals: [],
       compactions: [],
     });
     prisma.chat.create.mockResolvedValue(null);
@@ -198,6 +199,33 @@ describe("chat route rule freshness persistence", () => {
     prisma.$transaction.mockResolvedValue([{}, {}] as any);
 
     mockAiProcessAssistantChat.mockResolvedValue(createAssistantStreamResult());
+  });
+
+  it("replays previous replies without their conversation-bound reasoning", async () => {
+    const reply = { type: "text", text: "I found three matching messages." };
+    const reasoning = {
+      type: "reasoning",
+      text: "Previous model reasoning",
+      providerOptions: { anthropic: { signature: "previous-signature" } },
+    };
+    const nextTurn = { role: "user", content: "Show me the first one." };
+    mockConvertToModelMessages.mockResolvedValueOnce([
+      { role: "assistant", content: [reasoning, reply] },
+      { role: "assistant", content: [reasoning] },
+      nextTurn,
+    ]);
+    const expected = [{ role: "assistant", content: [reply] }, nextTurn];
+
+    const response = await POST(createRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockShouldCompact).toHaveBeenCalledWith(expected);
+    expect(mockAiProcessAssistantChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expected,
+        conversationMessagesForMemory: expected,
+      }),
+    );
   });
 
   it("passes the chat cursor into assistant processing and persists the highest seen revision", async () => {
@@ -268,6 +296,7 @@ describe("chat route rule freshness persistence", () => {
       id: "chat-1",
       emailAccountId: "other-email-account-id",
       messages: [],
+      actionTotals: [],
       compactions: [],
     } as any);
 
@@ -301,6 +330,7 @@ describe("chat route rule freshness persistence", () => {
       emailAccountId: "email-account-id",
       lastSeenRulesRevision: null,
       messages: [],
+      actionTotals: [],
       compactions: [],
     });
     mockAiProcessAssistantChat.mockImplementationOnce(async (args) => {
@@ -504,6 +534,7 @@ describe("chat route rule freshness persistence", () => {
           createdAt: new Date("2026-03-27T10:00:00.000Z"),
         },
       ],
+      actionTotals: [],
       compactions: [],
     });
 
@@ -535,6 +566,7 @@ describe("chat route rule freshness persistence", () => {
           createdAt: new Date("2026-03-27T10:00:00.000Z"),
         },
       ],
+      actionTotals: [],
       compactions: [],
     });
 
@@ -566,6 +598,7 @@ describe("chat route rule freshness persistence", () => {
           createdAt: new Date("2026-03-27T10:00:00.000Z"),
         },
       ],
+      actionTotals: [],
       compactions: [],
     });
 
@@ -584,6 +617,7 @@ describe("chat route rule freshness persistence", () => {
       emailAccountId: "email-account-id",
       lastSeenRulesRevision: null,
       messages: [],
+      actionTotals: [],
       compactions: [
         {
           id: "compaction-0",
@@ -656,6 +690,7 @@ describe("chat route rule freshness persistence", () => {
       emailAccountId: "email-account-id",
       lastSeenRulesRevision: null,
       messages: storedMessages,
+      actionTotals: [],
       compactions: [],
     });
     prisma.chatMessage.create.mockResolvedValueOnce({
@@ -707,6 +742,7 @@ describe("chat route rule freshness persistence", () => {
           createdAt: recentMessageCreatedAt,
         },
       ],
+      actionTotals: [],
       compactions: [
         {
           id: "compaction-0",

@@ -2,7 +2,12 @@ import { ZodError } from "zod";
 import { type NextRequest, NextResponse, after } from "next/server";
 import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
-import { captureException, checkCommonErrors, SafeError } from "@/utils/error";
+import {
+  captureException,
+  checkCommonErrors,
+  isInvalidGrantError,
+  SafeError,
+} from "@/utils/error";
 import {
   isPublicApiPath,
   publicApiErrorFromUnknown,
@@ -11,6 +16,8 @@ import {
 import { env } from "@/env";
 import { logErrorToPosthog } from "@/utils/error.server";
 import { createScopedLogger, type Logger } from "@/utils/logger";
+import { parseClientVersionHeader } from "@/utils/client-version";
+import { MAIL_CLIENT_HEADER } from "@inboxzero/mail-core/protocol/mail-http";
 import { flushLoggerSafely } from "@/utils/logger-flush";
 import { auth } from "@/utils/auth";
 import { getEmailAccount } from "@/utils/redis/account-validation";
@@ -88,9 +95,13 @@ function withMiddleware<T extends NextRequest>(
 ): NextHandler {
   return async (req, context) => {
     const requestId = getRequestId(req.headers.get("x-request-id"));
+    const clientVersion = parseClientVersionHeader(
+      req.headers.get(MAIL_CLIENT_HEADER),
+    );
     const baseLogger = createScopedLogger(scope || "api").with({
       requestId,
       url: getRequestPath(req),
+      ...(clientVersion ? { clientVersion } : {}),
     });
     const requestTimer =
       options?.requestTiming !== undefined
@@ -566,6 +577,10 @@ async function emailProviderMiddleware(
 
     return providerReq;
   } catch (error) {
+    if (isInvalidGrantError(error)) {
+      throw new SafeError("No refresh token");
+    }
+
     // Known errors (revoked access, rate-limit mode) are logged where they're
     // raised, and withMiddleware applies shared error handling.
     if (error instanceof SafeError || isProviderRateLimitModeError(error)) {

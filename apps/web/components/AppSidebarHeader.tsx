@@ -2,22 +2,26 @@
 
 import Link from "next/link";
 import { MailIcon, SparklesIcon } from "lucide-react";
+import { msg } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import { DesktopHistoryNav } from "@/components/DesktopHistoryNav";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { env } from "@/env";
 import { cn } from "@/utils";
 import { prefixPath } from "@/utils/path";
 
 type AppSection = "mail" | "assistant";
 
 const SECTIONS = [
-  { id: "mail", name: "Mail", path: "/mail", icon: MailIcon },
+  { id: "mail", name: msg`Mail`, path: "/mail", icon: MailIcon },
   {
     id: "assistant",
-    name: "Assistant",
+    name: msg`Assistant`,
     path: "/automation",
     icon: SparklesIcon,
   },
@@ -40,7 +44,7 @@ export function AppSidebarHeader({
   /** For sheets, which close on their own rather than collapsing. */
   hideToggle?: boolean;
 }) {
-  // On mac desktop the toggle is lifted beside the traffic lights in both
+  // On mac desktop the toggle and back/forward are lifted beside the traffic lights in both
   // states, so the header only needs to clear the lights' drag region, which
   // swallows clicks. The sidebars sit 0.5rem below the window top.
   if (collapsed) {
@@ -51,24 +55,37 @@ export function AppSidebarHeader({
           className="mb-2"
           data-desktop-mac-titlebar-toggle
         />
-        <AppSectionSwitcher
-          active={active}
-          emailAccountId={emailAccountId}
-          collapsed
-        />
+        <DesktopHistoryNav />
+        {env.NEXT_PUBLIC_MAIL_APP_ENABLED ? (
+          <AppSectionSwitcher
+            active={active}
+            emailAccountId={emailAccountId}
+            collapsed
+          />
+        ) : null}
       </div>
     );
   }
 
   return (
     <div className="flex shrink-0 items-center gap-1 pt-[max(0px,calc(var(--desktop-traffic-lights-height,0px)-0.5rem))] pb-2">
-      <AppSectionSwitcher
-        active={active}
-        emailAccountId={emailAccountId}
-        collapsed={false}
-      />
+      {env.NEXT_PUBLIC_MAIL_APP_ENABLED ? (
+        <AppSectionSwitcher
+          active={active}
+          emailAccountId={emailAccountId}
+          collapsed={false}
+        />
+      ) : (
+        <div className="flex-1" />
+      )}
       {hideToggle ? null : (
-        <SidebarTrigger name="left-sidebar" data-desktop-mac-titlebar-toggle />
+        <>
+          <SidebarTrigger
+            name="left-sidebar"
+            data-desktop-mac-titlebar-toggle
+          />
+          <DesktopHistoryNav />
+        </>
       )}
     </div>
   );
@@ -83,9 +100,11 @@ function AppSectionSwitcher({
   emailAccountId: string;
   collapsed: boolean;
 }) {
+  const { t, i18n } = useLingui();
+
   if (collapsed) {
     return (
-      <nav aria-label="App sections" className="flex flex-col gap-1 pb-2">
+      <nav aria-label={t`App sections`} className="flex flex-col gap-1 pb-2">
         {SECTIONS.map((section) => {
           const isActive = section.id === active;
           return (
@@ -101,10 +120,12 @@ function AppSectionSwitcher({
                   )}
                 >
                   <section.icon className="size-4" />
-                  <span className="sr-only">{section.name}</span>
+                  <span className="sr-only">{i18n._(section.name)}</span>
                 </Link>
               </TooltipTrigger>
-              <TooltipContent side="right">{section.name}</TooltipContent>
+              <TooltipContent side="right">
+                {i18n._(section.name)}
+              </TooltipContent>
             </Tooltip>
           );
         })}
@@ -114,7 +135,7 @@ function AppSectionSwitcher({
 
   return (
     <nav
-      aria-label="App sections"
+      aria-label={t`App sections`}
       className="grid flex-1 grid-cols-2 gap-0.5 rounded-lg bg-sidebar-accent p-0.5"
     >
       {SECTIONS.map((section) => {
@@ -131,7 +152,7 @@ function AppSectionSwitcher({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {section.name}
+            {i18n._(section.name)}
           </Link>
         );
       })}

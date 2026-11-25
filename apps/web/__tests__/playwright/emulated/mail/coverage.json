@@ -1,6 +1,16 @@
 {
+  "group-by-sender.spec.ts": [
+    "app/(app)/[emailAccountId]/mail/inbox-bundles.ts",
+    "app/(app)/[emailAccountId]/mail/InboxBundleRow.tsx",
+    "app/(app)/[emailAccountId]/mail/ListToolbar.tsx"
+  ],
+  "desktop-history.spec.ts": [
+    "components/DesktopHistoryNav.tsx",
+    "components/AppSidebarHeader.tsx"
+  ],
   "mail-setup.spec.ts": [
     "app/(app)/[emailAccountId]/mail/MailSetupPanel.tsx",
+    "app/(app)/[emailAccountId]/mail/SplitTabs.tsx",
     "app/(app)/[emailAccountId]/mail/ListToolbar.tsx",
     "utils/split-inbox/split-query.ts"
   ],
@@ -38,7 +48,12 @@
     "utils/mail-api/assistant-state.ts",
     "app/api/mail/v1/accounts/[accountId]/assistant-state/route.ts"
   ],
-  "attachment-previews.spec.ts": ["components/email-list/EmailAttachments.tsx"],
+  "attachment-previews.spec.ts": [
+    "components/email-list/EmailAttachments.tsx",
+    "components/email-list/AttachmentPreview.tsx",
+    "components/email-list/attachment-file-type.ts",
+    "components/email-list/OpenedConversationAttachments.tsx"
+  ],
   "cached-settings.spec.ts": ["hooks/useMailSettings.ts"],
   "calendar-invitation.spec.ts": [
     "components/email-list/CalendarInvitation.tsx"

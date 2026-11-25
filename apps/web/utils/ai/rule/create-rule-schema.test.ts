@@ -1,5 +1,6 @@
+import { zodSchema } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { z } from "zod";
+import { z } from "zod";
 import { ActionType } from "@/generated/prisma/enums";
 import {
   createRuleSchema,
@@ -249,6 +250,37 @@ describe("createRuleSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("trims static conditions and rejects ones that are only whitespace", () => {
+    const withStatic = (staticCondition: Record<string, string>) => ({
+      name: "Invoices",
+      condition: {
+        conditionalOperator: null,
+        aiInstructions: null,
+        static: staticCondition,
+      },
+      actions: [
+        { type: ActionType.ARCHIVE, fields: null, delayInMinutes: null },
+      ],
+    });
+
+    const result = createRuleSchema(provider).parse(
+      withStatic({
+        subject: " invoices  ",
+        from: " @billing.example ",
+        to: "",
+      }),
+    );
+    expect(result.condition.static).toEqual({
+      subject: "invoices",
+      from: "@billing.example",
+      to: null,
+    });
+    expect(
+      createRuleSchema(provider).safeParse(withStatic({ subject: "   " }))
+        .success,
+    ).toBe(false);
+  });
+
   it("accepts ARCHIVE actions with an empty fields object", () => {
     const result = createRuleSchema(provider).safeParse({
       ...buildRule({
@@ -403,6 +435,27 @@ describe("createRuleSchema", () => {
   });
 });
 
+describe("createRuleSchema provider limits", () => {
+  it.each([
+    ["google", false],
+    ["google", true],
+    ["microsoft", false],
+    ["microsoft", true],
+  ])("stays within Anthropic's strict schema limits for %s (integration actions: %s)", (provider, integrationActionsEnabled) => {
+    const { jsonSchema } = zodSchema(
+      z.object({
+        rules: z.array(createRuleSchema(provider, integrationActionsEnabled)),
+      }),
+    );
+    const counts = countSchemaParameters(jsonSchema);
+
+    expect(counts.unions).toBeLessThanOrEqual(ANTHROPIC_MAX_UNION_PARAMETERS);
+    expect(counts.optional).toBeLessThanOrEqual(
+      ANTHROPIC_MAX_OPTIONAL_PARAMETERS,
+    );
+  });
+});
+
 describe("getExtraActions", () => {
   beforeEach(() => {
     mockEnv.emailSendEnabled = true;
@@ -486,4 +539,33 @@ function buildRule(action: RuleActionFixture) {
     },
     actions: [action],
   };
+}
+
+// Anthropic's structured-output compiler rejects schemas past these limits.
+const ANTHROPIC_MAX_UNION_PARAMETERS = 16;
+const ANTHROPIC_MAX_OPTIONAL_PARAMETERS = 24;
+
+type JsonSchemaNode = {
+  type?: string | string[];
+  anyOf?: JsonSchemaNode[];
+  properties?: Record<string, JsonSchemaNode>;
+  required?: string[];
+  items?: JsonSchemaNode;
+};
+
+function countSchemaParameters(schema: unknown) {
+  const counts = { unions: 0, optional: 0 };
+  visit(schema as JsonSchemaNode);
+  return counts;
+
+  function visit(node: JsonSchemaNode | undefined) {
+    if (!node) return;
+    for (const [key, property] of Object.entries(node.properties ?? {})) {
+      if (Array.isArray(property.type) || property.anyOf) counts.unions++;
+      if (!node.required?.includes(key)) counts.optional++;
+      visit(property);
+    }
+    for (const option of node.anyOf ?? []) visit(option);
+    visit(node.items);
+  }
 }

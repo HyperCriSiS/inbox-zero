@@ -4,6 +4,7 @@ import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircleIcon,
+  ClockIcon,
   HistoryIcon,
   Loader2,
   MailIcon,
@@ -12,6 +13,9 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
+import type { I18n } from "@lingui/core";
+import { msg, plural } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Messages } from "./messages";
 import { PreviewAttachment } from "./preview-attachment";
 import { Button } from "@/components/ui/button";
@@ -24,7 +28,7 @@ import {
 import { useChats } from "@/hooks/useChats";
 import { LoadingContent } from "@/components/LoadingContent";
 import { Tooltip } from "@/components/Tooltip";
-import { useChat } from "@/providers/ChatProvider";
+import { QueuedMessageNotSentError, useChat } from "@/providers/ChatProvider";
 import type { Attachment } from "@/providers/ChatProvider";
 import {
   PromptInput,
@@ -64,6 +68,7 @@ export function Chat({
   open: boolean;
   onClose?: () => void;
 }) {
+  const { t, i18n } = useLingui();
   const analytics = useProductAnalytics("assistant_chat");
   const {
     chat,
@@ -79,6 +84,9 @@ export function Chat({
     attachments,
     setAttachments,
     submitTextMessage,
+    queuedMessage,
+    sendQueuedMessageNow,
+    unqueueMessage,
     stop,
   } = useChat();
   const { messages, status, regenerate, setMessages } = chat;
@@ -188,17 +196,19 @@ export function Chat({
   const firstName = session?.user?.name?.split(" ")[0];
   const hasMessages = messages.length > 0;
   const hasContent = input.trim().length > 0 || attachments.length > 0;
+  const isRunActive = status === "streaming" || status === "submitted";
 
   const inputArea = (
     <PromptInput
       onSubmit={(e) => {
         e.preventDefault();
-        if (hasContent && (status === "ready" || status === "error")) {
+        if (hasContent) {
           analytics.captureAction("chat_message_submitted", {
             has_text: input.trim().length > 0,
             attachment_count: attachments.length,
             has_context: Boolean(context),
             message_count: messages.length,
+            queued: isRunActive,
           });
           handleSubmit();
         }
@@ -208,6 +218,18 @@ export function Chat({
         <ChatSendError
           message={sendError.message}
           onNewChat={sendError.offerNewChat ? setNewChat : undefined}
+        />
+      ) : null}
+      {queuedMessage ? (
+        <QueuedMessageChip
+          message={queuedMessage}
+          onSendNow={() => {
+            analytics.captureAction("chat_queued_message_sent_now", {
+              status,
+            });
+            sendQueuedMessageNow();
+          }}
+          onRemove={unqueueMessage}
         />
       ) : null}
       {context ? (
@@ -237,7 +259,7 @@ export function Chat({
       <PromptInputTextarea
         data-testid="chat-input"
         value={input}
-        placeholder="Ask me anything"
+        placeholder={t`Ask me anything`}
         onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
           setInput(e.currentTarget.value)
         }
@@ -271,19 +293,20 @@ export function Chat({
               via_voice: true,
             });
             // A dictated message has no draft, so keep it for a retry.
-            submitTextMessage(text).catch(() => {
+            submitTextMessage(text).catch((error: unknown) => {
+              if (error instanceof QueuedMessageNotSentError) return;
               setInput((current) =>
                 current.trim() ? `${text}\n\n${current}` : text,
               );
             });
           }}
         />
-        <Tooltip content="Attach images">
+        <Tooltip content={t`Attach images`}>
           <Button
             type="button"
             variant="ghostMuted"
             size="icon"
-            aria-label="Attach images"
+            aria-label={t`Attach images`}
             className="size-9 rounded-full"
             onClick={() => {
               analytics.captureAction("chat_attach_button_clicked", {
@@ -297,23 +320,22 @@ export function Chat({
           </Button>
         </Tooltip>
 
+        {/* While a reply runs, typing turns stop into send, which queues. */}
         <PromptInputSubmit
-          status={
-            status === "streaming"
-              ? "streaming"
-              : status === "submitted"
-                ? "submitted"
-                : "ready"
+          status={isRunActive && !hasContent ? status : "ready"}
+          aria-label={
+            isRunActive && !hasContent ? t`Stop response` : t`Send message`
           }
-          disabled={
-            status === "ready" || status === "error" ? !hasContent : false
-          }
+          disabled={!isRunActive && !hasContent}
           onClick={(e) => {
-            if (status === "streaming" || status === "submitted") {
+            if (isRunActive && !hasContent) {
               analytics.captureAction("chat_generation_stopped", {
                 status,
               });
               e.preventDefault();
+              // A stop means "not that", so the queued message comes back
+              // for editing instead of going out.
+              unqueueMessage();
               stop();
               setMessages((messages) => messages);
             }
@@ -346,12 +368,14 @@ export function Chat({
         />
       ) : (
         <NewChatView
-          greeting={context ? null : getGreeting(firstName)}
-          suggestions={context ? [] : CHAT_EXAMPLES}
+          greeting={context ? null : getGreeting(firstName, i18n)}
+          suggestions={
+            context ? [] : CHAT_EXAMPLES.map((example) => i18n._(example))
+          }
           inputArea={inputArea}
-          onSuggestionClick={(text) => {
+          onSuggestionClick={(text, index) => {
             analytics.captureAction("chat_suggestion_clicked", {
-              suggestion_index: CHAT_EXAMPLES.indexOf(text),
+              suggestion_index: index,
             });
             submitTextMessage(text).catch(() => undefined);
             saveDraftInput("");
@@ -402,9 +426,9 @@ function ChatMessagesView({
 }
 
 const CHAT_EXAMPLES = [
-  "Help me handle my inbox today",
-  "Clean up my inbox",
-  "Suggest rules I should add",
+  msg`Help me handle my inbox today`,
+  msg`Clean up my inbox`,
+  msg`Suggest rules I should add`,
 ];
 
 function NewChatView({
@@ -416,7 +440,7 @@ function NewChatView({
   greeting: string | null;
   suggestions: string[];
   inputArea: React.ReactNode;
-  onSuggestionClick: (text: string) => void;
+  onSuggestionClick: (text: string, index: number) => void;
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-[var(--chat-px)]">
@@ -428,13 +452,13 @@ function NewChatView({
         ) : null}
         {inputArea}
         <div className="mt-3 flex flex-wrap justify-center gap-2">
-          {suggestions.map((example) => (
+          {suggestions.map((example, index) => (
             <Button
               key={example}
               variant="outline"
               size="sm"
               className="rounded-full"
-              onClick={() => onSuggestionClick(example)}
+              onClick={() => onSuggestionClick(example, index)}
             >
               {example}
             </Button>
@@ -464,27 +488,32 @@ function ChatTopBar({
 }
 
 function NewChatButton() {
+  const { t } = useLingui();
   const { setNewChat } = useChat();
 
   return (
-    <Tooltip content="Start a new conversation">
+    <Tooltip content={t`Start a new conversation`}>
       <Button variant="ghost" size="icon" onClick={setNewChat}>
         <PlusIcon className="size-5" />
-        <span className="sr-only">New Chat</span>
+        <span className="sr-only">
+          <Trans>New Chat</Trans>
+        </span>
       </Button>
     </Tooltip>
   );
 }
 
 function CloseChatButton({ onClose }: { onClose: () => void }) {
+  const { t } = useLingui();
+
   return (
-    <Tooltip content="Close assistant">
+    <Tooltip content={t`Close assistant`}>
       <Button
         type="button"
         variant="ghost"
         size="icon"
         onClick={onClose}
-        aria-label="Close assistant"
+        aria-label={t`Close assistant`}
       >
         <XIcon className="size-5" aria-hidden="true" />
       </Button>
@@ -493,6 +522,7 @@ function CloseChatButton({ onClose }: { onClose: () => void }) {
 }
 
 function ChatHistoryDropdown() {
+  const { t, i18n } = useLingui();
   const [shouldLoadChats, setShouldLoadChats] = useState(false);
   const [open, setOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<ChatHistoryEntry | null>(
@@ -513,7 +543,7 @@ function ChatHistoryDropdown() {
           if (value) setShouldLoadChats(true);
         }}
       >
-        <Tooltip content="View previous conversations">
+        <Tooltip content={t`View previous conversations`}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
@@ -525,7 +555,9 @@ function ChatHistoryDropdown() {
               }}
             >
               <HistoryIcon className="size-5" />
-              <span className="sr-only">Chat History</span>
+              <span className="sr-only">
+                <Trans>Chat History</Trans>
+              </span>
             </Button>
           </DropdownMenuTrigger>
         </Tooltip>
@@ -539,11 +571,13 @@ function ChatHistoryDropdown() {
                 className="flex items-center justify-center"
               >
                 <Loader2 className="mr-2 size-4 animate-spin" />
-                Loading chats...
+                <Trans>Loading chats...</Trans>
               </DropdownMenuItem>
             }
             errorComponent={
-              <DropdownMenuItem disabled>Error loading chats</DropdownMenuItem>
+              <DropdownMenuItem disabled>
+                <Trans>Error loading chats</Trans>
+              </DropdownMenuItem>
             }
           >
             {data && data.chats.length > 0 ? (
@@ -567,7 +601,7 @@ function ChatHistoryDropdown() {
               ))
             ) : (
               <DropdownMenuItem disabled>
-                No previous chats found
+                <Trans>No previous chats found</Trans>
               </DropdownMenuItem>
             )}
           </LoadingContent>
@@ -581,7 +615,9 @@ function ChatHistoryDropdown() {
         }}
         chatId={renameTarget?.id ?? ""}
         currentName={renameTarget?.name ?? ""}
-        defaultLabel={renameTarget ? getChatHistoryLabel(renameTarget) : ""}
+        defaultLabel={
+          renameTarget ? getChatHistoryLabel(renameTarget, i18n) : ""
+        }
         onRenamed={mutate}
       />
       <DeleteChatDialog
@@ -590,7 +626,7 @@ function ChatHistoryDropdown() {
           if (!value) setDeleteTarget(null);
         }}
         chatId={deleteTarget?.id ?? ""}
-        label={deleteTarget ? getChatHistoryLabel(deleteTarget) : ""}
+        label={deleteTarget ? getChatHistoryLabel(deleteTarget, i18n) : ""}
         onDeleted={() => {
           if (deleteTarget && chatId === deleteTarget.id) setChatId(null);
           mutate();
@@ -624,9 +660,64 @@ function ChatSendError({
             className="h-auto shrink-0 px-1.5 py-0.5 text-destructive hover:text-destructive"
             onClick={onNewChat}
           >
-            New chat
+            <Trans>New chat</Trans>
           </Button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function QueuedMessageChip({
+  message,
+  onSendNow,
+  onRemove,
+}: {
+  message: { text: string; attachments: Attachment[] };
+  onSendNow: () => void;
+  onRemove: () => void;
+}) {
+  const { t } = useLingui();
+  const attachmentCount = message.attachments.length;
+
+  return (
+    <div className="px-2 pt-2">
+      <div
+        data-testid="chat-queued-message"
+        className="flex max-w-full items-center gap-2.5 rounded-lg border border-dashed bg-muted/40 py-1.5 pl-2.5 pr-1"
+      >
+        <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="truncate text-sm">
+            {message.text ||
+              t`${plural(attachmentCount, {
+                one: "# image",
+                other: "# images",
+              })}`}
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            <Trans>Sends when the assistant finishes</Trans>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="shrink-0"
+          onClick={onSendNow}
+        >
+          <Trans>Send now</Trans>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="iconXs"
+          aria-label={t`Remove queued message`}
+          className="shrink-0 text-muted-foreground"
+          onClick={onRemove}
+        >
+          <XIcon className="size-3.5" />
+        </Button>
       </div>
     </div>
   );
@@ -639,6 +730,7 @@ function ChatContextChip({
   context: MessageContext;
   onRemove: () => void;
 }) {
+  const { t } = useLingui();
   const { subject, from } = context.message.headers;
   const Icon = context.type === "fix-rule" ? WrenchIcon : MailIcon;
 
@@ -651,7 +743,7 @@ function ChatContextChip({
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-sm font-medium">
-            {subject || "(no subject)"}
+            {subject || t`(no subject)`}
           </div>
           <div className="truncate text-xs text-muted-foreground">
             {extractNameFromEmail(from)}
@@ -661,7 +753,7 @@ function ChatContextChip({
           type="button"
           variant="ghost"
           size="iconXs"
-          aria-label="Remove email from chat"
+          aria-label={t`Remove email from chat`}
           className="shrink-0 text-muted-foreground"
           onClick={onRemove}
         >
@@ -672,13 +764,26 @@ function ChatContextChip({
   );
 }
 
-function getGreeting(firstName: string | undefined): string {
+function getGreeting(firstName: string | undefined, i18n: I18n): string {
   const hour = new Date().getHours();
-  const name = firstName ? `, ${firstName}` : "";
-  if (hour < 5) return `Hey there${name}`;
-  if (hour < 12) return `Good morning${name}`;
-  if (hour < 18) return `Good afternoon${name}`;
-  return `Good evening${name}`;
+  if (hour < 5) {
+    return firstName
+      ? i18n._(msg`Hey there, ${firstName}`)
+      : i18n._(msg`Hey there`);
+  }
+  if (hour < 12) {
+    return firstName
+      ? i18n._(msg`Good morning, ${firstName}`)
+      : i18n._(msg`Good morning`);
+  }
+  if (hour < 18) {
+    return firstName
+      ? i18n._(msg`Good afternoon, ${firstName}`)
+      : i18n._(msg`Good afternoon`);
+  }
+  return firstName
+    ? i18n._(msg`Good evening, ${firstName}`)
+    : i18n._(msg`Good evening`);
 }
 
 const DRAFT_INPUT_STORAGE_KEY = "input";

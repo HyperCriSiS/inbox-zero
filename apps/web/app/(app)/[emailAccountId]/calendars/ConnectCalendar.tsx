@@ -1,5 +1,6 @@
 "use client";
 
+import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ export function ConnectCalendar({
   analyticsPage?: AppPage;
   onboardingReturnPath?: string;
 }) {
+  const { t } = useLingui();
   const { emailAccountId } = useAccount();
   const analytics = useProductAnalytics(analyticsPage);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
@@ -61,8 +63,8 @@ export function ConnectCalendar({
         extra: { context: "Google Calendar OAuth initiation" },
       });
       toastError({
-        title: "Error initiating Google calendar connection",
-        description: "Please try again or contact support",
+        title: t`Error initiating Google calendar connection`,
+        description: t`Please try again or contact support`,
       });
       setIsConnectingGoogle(false);
     }
@@ -96,8 +98,8 @@ export function ConnectCalendar({
         extra: { context: "Microsoft Calendar OAuth initiation" },
       });
       toastError({
-        title: "Error initiating Microsoft calendar connection",
-        description: "Please try again or contact support",
+        title: t`Error initiating Microsoft calendar connection`,
+        description: t`Please try again or contact support`,
       });
       setIsConnectingMicrosoft(false);
     }
@@ -122,7 +124,7 @@ export function ConnectCalendar({
               height={16}
               unoptimized
             />
-            {isConnectingGoogle ? "Connecting..." : "Add Google Calendar"}
+            {isConnectingGoogle ? t`Connecting...` : t`Add Google Calendar`}
           </Button>
 
           <Button
@@ -138,7 +140,7 @@ export function ConnectCalendar({
               height={16}
               unoptimized
             />
-            {isConnectingMicrosoft ? "Connecting..." : "Add Outlook Calendar"}
+            {isConnectingMicrosoft ? t`Connecting...` : t`Add Outlook Calendar`}
           </Button>
         </>
       )}

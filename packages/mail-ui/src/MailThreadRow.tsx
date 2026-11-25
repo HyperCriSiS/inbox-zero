@@ -22,6 +22,8 @@ export type MailThreadRowProps = {
   isStarred: boolean;
   isDraft: boolean;
   messageCount: number;
+  /** Replaces the message count, for a row that stands for several conversations. */
+  countBadge?: ReactNode;
   isFocused: boolean;
   isSelected: boolean;
   hasAnySelection: boolean;
@@ -33,6 +35,11 @@ export type MailThreadRowProps = {
   onSelectRangeTo: (index: number) => void;
   rowRef?: Ref<HTMLDivElement>;
   renderSelectionControl?: (input: MailThreadRowSelectionInput) => ReactNode;
+  strings?: Partial<{
+    draft: string;
+    starredConversation: string;
+    selectConversation: (participantSummary: string) => string;
+  }>;
 };
 
 export function MailThreadRow({
@@ -49,6 +56,7 @@ export function MailThreadRow({
   isStarred,
   isDraft,
   messageCount,
+  countBadge,
   isFocused,
   isSelected,
   hasAnySelection,
@@ -60,13 +68,16 @@ export function MailThreadRow({
   onSelectRangeTo,
   rowRef,
   renderSelectionControl,
+  strings,
 }: MailThreadRowProps) {
   const isWide = layout === "list" && !compact;
   const showSelection = isSelected || hasAnySelection;
   const selectionControl =
     selectionEnabled && renderSelectionControl
       ? renderSelectionControl({
-          ariaLabel: `Select conversation with ${participantSummary}`,
+          ariaLabel:
+            strings?.selectConversation?.(participantSummary) ??
+            `Select conversation with ${participantSummary}`,
           checked: isSelected,
           visible: showSelection,
           onClick: (event) => {
@@ -77,14 +88,17 @@ export function MailThreadRow({
         })
       : null;
   const draftMarker = isDraft ? (
-    <span className="shrink-0 text-primary text-sm">Draft</span>
+    <span className="shrink-0 text-primary text-sm">
+      {strings?.draft ?? "Draft"}
+    </span>
   ) : null;
   const messageCountMarker =
-    messageCount > 1 ? (
+    countBadge ??
+    (messageCount > 1 ? (
       <span className="shrink-0 font-normal text-muted-foreground text-xs">
         {messageCount}
       </span>
-    ) : null;
+    ) : null);
   const participantLine = (
     <>
       <span
@@ -151,7 +165,11 @@ export function MailThreadRow({
       role="option"
       tabIndex={isFocused ? 0 : -1}
     >
-      {isStarred && <span className="sr-only">Starred conversation</span>}
+      {isStarred && (
+        <span className="sr-only">
+          {strings?.starredConversation ?? "Starred conversation"}
+        </span>
+      )}
       <span
         className={cx(
           "flex h-3.5 shrink-0 items-center gap-1.5",
@@ -199,7 +217,7 @@ export function MailThreadRow({
               </span>
             </div>
           )}
-          <div className="w-16 shrink-0 text-right">{date}</div>
+          <div className="min-w-16 shrink-0 text-right">{date}</div>
         </>
       ) : (
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">

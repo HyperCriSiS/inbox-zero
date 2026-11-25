@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { Client } from "pg";
 import { getEmailAccount } from "../account-test-helpers";
+import { grantDefaultPlan } from "../billing/billing-test-helpers";
 import { playwrightMailProvider } from "../mail-provider";
 
 const PLAYWRIGHT_TEST_EMAIL =
@@ -67,9 +68,27 @@ test(`${playwrightMailProvider} emulator signs in and creates an app account`, a
       },
     );
     expect(response.ok(), await response.text()).toBe(true);
+    const csvResponse = await page.request.post(
+      `${process.env.MICROSOFT_BASE_URL}/v1.0/me/messages/msg_playwright_reader_visual_received/attachments`,
+      {
+        headers: {
+          Authorization: "Bearer playwright_microsoft_fixture_token",
+        },
+        data: {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: "invoices.csv",
+          contentType: "application/octet-stream",
+          contentBytes: Buffer.from(
+            'Invoice,Customer,Amount\nINV-001,"Acme, Inc.",1200.00\nINV-002,Globex,640.50\n',
+          ).toString("base64"),
+        },
+      },
+    );
+    expect(csvResponse.ok(), await csvResponse.text()).toBe(true);
   }
 
   await markOnboardingComplete(PLAYWRIGHT_TEST_EMAIL);
+  await grantDefaultPlan();
   const emailAccount = await getEmailAccount(page);
   expect(emailAccount.email).toBe(PLAYWRIGHT_TEST_EMAIL);
 
@@ -109,7 +128,10 @@ async function markOnboardingComplete(email: string) {
            SET "behaviorProfile" = '{}'::jsonb,
                "personaAnalysis" = '{}'::jsonb,
                "writingStyle" = 'Playwright seeded writing style',
-               "mailSetup" = 'DONE'
+               "mailSetup" = 'DONE',
+               -- Specs pick seeded rows by subject, and many share a sender.
+               -- group-by-sender.spec.ts turns grouping back on.
+               "mailGroupBySender" = false
            WHERE email = $1`,
           [email],
         );
